@@ -10,8 +10,15 @@ import {
 } from 'discord-interactions';
 import { INVITE_COMMAND, TEST_COMMAND } from './commands.js';
 import { InteractionResponseFlags } from 'discord-interactions';
+import dotenv from 'dotenv';
+import process from 'node:process';
+
 
 const DISCORD_API = 'https://discord.com/api/v10';
+
+dotenv.config({ path: '.dev.vars' });
+
+const BOT_TOKEN = process.env.DISCORD_TOKEN;
 
 async function createAdminRole(guildId) {
   const response = await fetch(`${DISCORD_API}/guilds/${guildId}/roles`, {
