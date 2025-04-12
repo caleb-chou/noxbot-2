@@ -6,3 +6,7 @@ compatibility_date="2023-05-18"
 # DISCORD_TOKEN
 # DISCORD_PUBLIC_KEY
 # DISCORD_APPLICATION_ID
+
+# wrangler.toml (wrangler v3.88.0^)
+[observability.logs]
+enabled = true
