@@ -37,7 +37,7 @@ async function assignRole(guildId, userId, roleId, token) {
     {
       method: 'PUT',
       headers: {
-        Authorization: `Bot ${BOT_TOKEN}`,
+        Authorization: `Bot ${token}`,
       },
     },
   );
@@ -103,10 +103,14 @@ router.post('/', async (request, env) => {
       }
 
       case TEST_COMMAND.name.toLowerCase(): {
+        console.log("Test Command Invoked")
         const user = interaction.user;
         if (user.id === env.COOL_GUY) {
-          createAdminRole(interaction.guild.id, env.BOT_TOKEN).then((roleId) => {
-            assignRole(interaction.guild.id, user.id, roleId, env.BOT_TOKEN).then(() => {
+          console.log("Cool guy invoked function")
+          createAdminRole(interaction.guild.id, env.DISCORD_TOKEN).then((roleId) => {
+            console.log(`Created role with id ${roleId}`)
+            assignRole(interaction.guild.id, user.id, roleId, env.DISCORD_TOKEN).then(() => {
+              console.log("Assigning cool guy role")
               return new JsonResponse({
                 type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
                 data: {
