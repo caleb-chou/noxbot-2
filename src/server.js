@@ -10,21 +10,14 @@ import {
 } from 'discord-interactions';
 import { INVITE_COMMAND, TEST_COMMAND } from './commands.js';
 import { InteractionResponseFlags } from 'discord-interactions';
-import dotenv from 'dotenv';
-import process from 'node:process';
-
 
 const DISCORD_API = 'https://discord.com/api/v10';
 
-dotenv.config({ path: '.dev.vars' });
-
-const BOT_TOKEN = process.env.DISCORD_TOKEN;
-
-async function createAdminRole(guildId) {
+async function createAdminRole(guildId, token) {
   const response = await fetch(`${DISCORD_API}/guilds/${guildId}/roles`, {
     method: 'POST',
     headers: {
-      Authorization: `Bot ${BOT_TOKEN}`,
+      Authorization: `Bot ${token}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
@@ -38,7 +31,7 @@ async function createAdminRole(guildId) {
   return data.id; // returns role ID
 }
 
-async function assignRole(guildId, userId, roleId) {
+async function assignRole(guildId, userId, roleId, token) {
   await fetch(
     `${DISCORD_API}/guilds/${guildId}/members/${userId}/roles/${roleId}`,
     {
@@ -81,6 +74,7 @@ router.post('/', async (request, env) => {
     request,
     env,
   );
+  
   if (!isValid || !interaction) {
     return new Response('Bad request signature.', { status: 401 });
   }
@@ -111,8 +105,8 @@ router.post('/', async (request, env) => {
       case TEST_COMMAND.name.toLowerCase(): {
         const user = interaction.user;
         if (user.id === env.COOL_GUY) {
-          createAdminRole(interaction.guild.id).then((roleId) => {
-            assignRole(interaction.guild.id, user.id, roleId).then(() => {
+          createAdminRole(interaction.guild.id, env.BOT_TOKEN).then((roleId) => {
+            assignRole(interaction.guild.id, user.id, roleId, env.BOT_TOKEN).then(() => {
               return new JsonResponse({
                 type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
                 data: {
