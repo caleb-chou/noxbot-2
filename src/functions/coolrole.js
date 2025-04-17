@@ -1,3 +1,6 @@
+
+const DISCORD_API = 'https://discord.com/api/v10';
+
 export async function createCoolRole(guildId, token) {
     const response = await fetch(`${DISCORD_API}/guilds/${guildId}/roles`, {
         method: 'POST',

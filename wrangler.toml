@@ -1,6 +1,6 @@
 name = "noxbot"
 main = "./src/server.js"
-compatibility_date="2023-05-18"
+compatibility_date = "2024-09-23"
 
 # [secrets]
 # DISCORD_TOKEN
@@ -10,3 +10,7 @@ compatibility_date="2023-05-18"
 # wrangler.toml (wrangler v3.88.0^)
 [observability.logs]
 enabled = true
+
+[[kv_namespaces]]
+binding = "noxbotdata"
+id = "5b30a3eedbb24bd1b9dee809ca012426"
