@@ -15,11 +15,11 @@ export const TEST_COMMAND = {
 };
 
 export const GET_USER_DATA = {
-  name: 'getUserData',
+  name: 'getuserdata',
   description: 'Fetches data for user'
 }
 
 export const SET_USER_DATA = {
-  name: 'setUserData',
+  name: 'setuserdata',
   description: 'Sets data for user'
 }
