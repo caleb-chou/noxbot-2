@@ -3,3 +3,4 @@ coverage
 *.vars
 .wrangler
 *-lock.*
+*.db

@@ -1,0 +1,8 @@
+const ADMIN_PERMISSION = 0x00000008;
+
+export function isAdmin(interaction) {
+  if (!interaction.member || !interaction.member.permissions) return false;
+
+  const perms = BigInt(interaction.member.permissions);
+  return (perms & BigInt(ADMIN_PERMISSION)) === BigInt(ADMIN_PERMISSION);
+}

