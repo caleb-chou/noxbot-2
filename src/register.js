@@ -1,4 +1,12 @@
-import { COINFLIP_COMMAND, EIGHTBALL_COMMAND, GET_USER_DATA, INVITE_COMMAND, TEST_COMMAND } from './commands.js';
+import {
+  COINFLIP_COMMAND,
+  EIGHTBALL_COMMAND,
+  GET_STATS_COMMAND,
+  GET_USER_DATA,
+  INVITE_COMMAND,
+  TEST_COMMAND,
+  UPDATE_STATS_COMMAND,
+} from './commands.js';
 import dotenv from 'dotenv';
 import process from 'node:process';
 
@@ -34,7 +42,15 @@ const response = await fetch(url, {
     Authorization: `Bot ${token}`,
   },
   method: 'PUT',
-  body: JSON.stringify([INVITE_COMMAND, TEST_COMMAND, GET_USER_DATA, COINFLIP_COMMAND, EIGHTBALL_COMMAND]),
+  body: JSON.stringify([
+    INVITE_COMMAND,
+    TEST_COMMAND,
+    GET_USER_DATA,
+    COINFLIP_COMMAND,
+    EIGHTBALL_COMMAND,
+    GET_STATS_COMMAND,
+    UPDATE_STATS_COMMAND,
+  ]),
 });
 
 if (response.ok) {

@@ -8,7 +8,14 @@ import {
   InteractionType,
   verifyKey,
 } from 'discord-interactions';
-import { COINFLIP_COMMAND, GET_USER_DATA, INVITE_COMMAND, TEST_COMMAND, EIGHTBALL_COMMAND } from './commands.js';
+import {
+  COINFLIP_COMMAND,
+  GET_USER_DATA,
+  INVITE_COMMAND,
+  TEST_COMMAND,
+  EIGHTBALL_COMMAND,
+  GET_STATS_COMMAND,
+} from './commands.js';
 import { InteractionResponseFlags } from 'discord-interactions';
 import { createCoolRole, assignRole } from './functions/coolrole.js';
 import { UserData } from './resources/UserData.js';
@@ -16,8 +23,6 @@ import { JsonResponse } from './util.js';
 import { coinFlip } from './functions/coinflip.js';
 import { eightBall } from './functions/eightball.js';
 import { isAdmin } from './util.js';
-
-
 
 const router = AutoRouter();
 
@@ -78,14 +83,14 @@ router.post('/', async (request, env) => {
         //     }
         //   });
         // }
-        console.log('id part')
+        console.log('id part');
         const id = env.NOXBOT_DATA.idFromName(interaction.member.user.id);
-        console.log(id)
-        console.log('get part')
+        console.log(id);
+        console.log('get part');
         const stub = env.NOXBOT_DATA.get(id);
-        console.log('id part')
+        console.log('id part');
         const res = await stub.fetch('https://dummy/increment');
-        console.log('data part')
+        console.log('data part');
         const data = await res.json();
 
         console.log(data);
@@ -97,6 +102,36 @@ router.post('/', async (request, env) => {
             flags: InteractionResponseFlags.EPHEMERAL,
           },
         });
+      }
+
+      case GET_STATS_COMMAND.name.toLowerCase(): {
+        const id = env.NOXBOT_DATA.idFromName(interaction.member.user.id);
+        const stub = env.NOXBOT_DATA.get(id);
+        const res = await stub.fetch('https://dummy/get');
+        const data = await res.json();
+        console.log(data);
+
+        const ephemeral = interaction.data.options?.find(
+          (option) => option.name === 'ephemeral',
+        )?.value;
+
+        const stat = interaction.data.options?.find(
+          (option) => option.name === 'stat',
+        )?.value;
+
+        let body = {
+          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+          data: {
+            content: `${JSON.stringify(stat ? data[stat]: data)}`,
+            flags: InteractionResponseFlags.EPHEMERAL,
+          },
+        };
+
+        if (ephemeral) {
+          body.data.flags = InteractionResponseFlags.EPHEMERAL;
+        }
+
+        return new JsonResponse(body);
       }
 
       case EIGHTBALL_COMMAND.name.toLowerCase(): {
@@ -147,7 +182,8 @@ router.post('/', async (request, env) => {
               },
             });
           }
-        } break;
+        }
+        break;
       }
 
       default:

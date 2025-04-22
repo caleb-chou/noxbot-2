@@ -3,7 +3,6 @@
  * and registration.
  */
 
-
 export const INVITE_COMMAND = {
   name: 'invite',
   description: 'Get an invite link to add the bot to your server',
@@ -16,13 +15,13 @@ export const TEST_COMMAND = {
 
 export const GET_USER_DATA = {
   name: 'getuserdata',
-  description: 'Fetches data for user'
-}
+  description: 'Fetches data for user',
+};
 
 export const SET_USER_DATA = {
   name: 'setuserdata',
-  description: 'Sets data for user'
-}
+  description: 'Sets data for user',
+};
 
 export const COINFLIP_COMMAND = {
   name: 'coinflip',
@@ -45,6 +44,62 @@ export const EIGHTBALL_COMMAND = {
       name: 'question',
       description: 'The question to ask the magic 8-ball',
       type: 3, // STRING
+      required: true,
+    },
+    {
+      name: 'ephemeral',
+      description: 'Make the response ephemeral',
+      type: 5, // BOOLEAN
+      required: false,
+    },
+  ],
+};
+
+export const GET_STATS_COMMAND = {
+  name: 'getstats',
+  description: 'Get stats for a user',
+  options: [
+    {
+      name: 'user',
+      description: 'The user to get stats for',
+      type: 6, // USER
+      required: true,
+    },
+    {
+      name: 'stat',
+      description: 'The stat to get',
+      type: 3, // STRING
+      required: false,
+    },
+    {
+      name: 'ephemeral',
+      description: 'Make the response ephemeral',
+      type: 5, // BOOLEAN
+      required: false,
+    },
+  ],
+};
+
+export const UPDATE_STATS_COMMAND = {
+  name: 'updatestats',
+  description: 'Update stats for a user',
+  options: [
+    {
+      name: 'user',
+      description: 'The user to update stats for',
+      type: 6, // USER
+      required: true,
+    },
+    {
+      name: 'stat',
+      description: 'The stat to update',
+      type: 3, // STRING
+      required: true,
+    },
+    {
+      name: 'value',
+      description: 'The value to set the stat to',
+      type: 4,
       required: true,
     },
     {
