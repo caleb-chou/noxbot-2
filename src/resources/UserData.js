@@ -8,10 +8,13 @@ export class UserData {
     const { pathname } = new URL(request.url);
 
     if (pathname === '/increment') {
-      const key = 'count';
-      let count = (await this.state.storage.get(key)) || 0;
+      const data = await request.json();
+      if (!data.key || !data.value) {
+        return new Response('Invalid data', { status: 400 });
+      }
+      let count = (await this.state.storage.get(data.key)) || 0;
       count++;
-      await this.state.storage.put(key, count);
+      await this.state.storage.put(data.key, count);
       return new Response(JSON.stringify({ count }));
     }
 
@@ -20,6 +23,15 @@ export class UserData {
       return new Response(JSON.stringify(Object.fromEntries(allData)), {
         headers: { 'Content-Type': 'application/json' },
       });
+    }
+
+    if (pathname === '/set') {
+      const data = await request.json();
+      if (!data.key || !data.value) {
+        return new Response('Invalid data', { status: 400 });
+      }
+      await this.state.storage.put(data.key, data.value);
+      return new Response('Data set successfully', { status: 200 });
     }
 
     return new Response('Not found', { status: 404 });
