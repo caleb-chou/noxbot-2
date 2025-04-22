@@ -171,6 +171,19 @@ router.post('/', async (request, env) => {
       }
 
       case UPDATE_STATS_COMMAND.name.toLowerCase(): {
+
+        const hasAdmin = (BigInt(interaction.member.permissions) & BigInt(0x00000008)) !== 0n; // ADMINISTRATOR bit
+
+        if (!hasAdmin) {
+          return new JsonResponse({
+            type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+            data: {
+              content: "You don't have permission to use this command.",
+              flags: InteractionResponseFlags.EPHEMERAL,
+            },
+          });
+        }
+
         const user = interaction.data.options?.find(
           (option) => option.name === 'user',
         )?.value;
