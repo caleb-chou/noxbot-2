@@ -16,7 +16,7 @@ export class UserData {
     }
 
     if (pathname === '/get') {
-      const allData = await this.storage.list();
+      const allData = await this.state.storage.list();
       return new Response(JSON.stringify(Object.fromEntries(allData)), {
         headers: { 'Content-Type': 'application/json' },
       });
