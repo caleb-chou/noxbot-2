@@ -86,11 +86,8 @@ router.post('/', async (request, env) => {
         console.log('id part');
         const id = env.NOXBOT_DATA.idFromName(interaction.member.user.id);
         console.log(id);
-        console.log('get part');
         const stub = env.NOXBOT_DATA.get(id);
-        console.log('id part');
         const res = await stub.fetch('https://dummy/increment');
-        console.log('data part');
         const data = await res.json();
 
         console.log(data);
@@ -109,7 +106,7 @@ router.post('/', async (request, env) => {
           (option) => option.name === 'user',
         )?.value;
 
-        const id = env.NOXBOT_DATA.idFromName(user.id);
+        const id = env.NOXBOT_DATA.idFromName(user);
         const stub = env.NOXBOT_DATA.get(id);
         const res = await stub.fetch('https://dummy/get');
         const data = await res.json();
