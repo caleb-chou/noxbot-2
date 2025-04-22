@@ -105,7 +105,11 @@ router.post('/', async (request, env) => {
       }
 
       case GET_STATS_COMMAND.name.toLowerCase(): {
-        const id = env.NOXBOT_DATA.idFromName(interaction.member.user.id);
+        const user = interaction.data.options?.find(
+          (option) => option.name === 'user',
+        )?.value;
+
+        const id = env.NOXBOT_DATA.idFromName(user.id);
         const stub = env.NOXBOT_DATA.get(id);
         const res = await stub.fetch('https://dummy/get');
         const data = await res.json();
