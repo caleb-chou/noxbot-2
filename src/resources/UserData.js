@@ -27,6 +27,7 @@ export class UserData {
 
     if (pathname === '/set') {
       const data = await request.json();
+      console.log(`${data}`)
       if (!data.key || !data.value) {
         return new Response('Invalid data', { status: 400 });
       }
