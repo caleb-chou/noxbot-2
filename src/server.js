@@ -11,8 +11,9 @@ import {
 import { GET_USER_DATA, INVITE_COMMAND, TEST_COMMAND } from './commands.js';
 import { InteractionResponseFlags } from 'discord-interactions';
 import { createCoolRole, assignRole } from './functions/coolrole.js';
-import { getUserData } from './resources/UserData.js';
-import { isAdmin } from './util';
+import { UserData } from './resources/UserData.js';
+
+import { isAdmin } from './util.js';
 
 class JsonResponse extends Response {
   constructor(body, init) {
@@ -76,22 +77,34 @@ router.post('/', async (request, env) => {
       }
 
       case GET_USER_DATA.name.toLowerCase(): {
-        if (!isAdmin(interaction)) {
-          return new JsonResponse({
-            type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-            data: {
-              content: `You can't do that!`,
-              flags: InteractionResponseFlags.EPHEMERAL,
-            }
-          });
-        }
+        // if (!isAdmin(interaction)) {
+        //   return new JsonResponse({
+        //     type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+        //     data: {
+        //       content: `You can't do that!`,
+        //       flags: InteractionResponseFlags.EPHEMERAL,
+        //     }
+        //   });
+        // }
+        console.log('id part')
+        const id = env.NOXBOT_DATA.idFromName(interaction.member.user.id);
+        console.log(id)
+        console.log('get part')
+        const stub = env.NOXBOT_DATA.get(id);
+        console.log('id part')
+        const res = await stub.fetch('https://dummy/increment');
+        console.log('data part')
+        const data = await res.json();
+
+        console.log(data);
+
         return new JsonResponse({
           type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
           data: {
-            content: await getUserData(env, interaction.user.id),
+            content: `This is a test ${false}`,
             flags: InteractionResponseFlags.EPHEMERAL,
-          }
-        })
+          },
+        });
       }
 
       case TEST_COMMAND.name.toLowerCase(): {
@@ -159,3 +172,4 @@ const server = {
 };
 
 export default server;
+export { UserData };
