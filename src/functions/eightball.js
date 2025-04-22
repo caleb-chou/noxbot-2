@@ -48,7 +48,7 @@ export async function eightBall(question, interaction, ephemeral) {
       embeds: [
         {
           author: {
-            name: `${interaction.member.user.username} asked ${question}`,
+            name: `${interaction.member.user.username} asked: *${question}*`,
             icon_url: interaction.member.user.avatar
               ? `https://cdn.discordapp.com/avatars/${interaction.member.user.id}/${interaction.member.user.avatar}.png`
               : undefined,
