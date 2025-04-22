@@ -98,7 +98,7 @@ router.post('/', async (request, env) => {
         return new JsonResponse({
           type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
           data: {
-            content: `This is a test ${false}`,
+            content: `This is a test ${JSON.stringify(data)}`,
             flags: InteractionResponseFlags.EPHEMERAL,
           },
         });
@@ -126,8 +126,7 @@ router.post('/', async (request, env) => {
         let body = {
           type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
           data: {
-            content: `${JSON.stringify(stat ? data[stat]: data)}`,
-            flags: InteractionResponseFlags.EPHEMERAL,
+            content: `${JSON.stringify(stat ? data[stat]: data)}`
           },
         };
 
