@@ -23,3 +23,16 @@ export const SET_USER_DATA = {
   name: 'setuserdata',
   description: 'Sets data for user'
 }
+
+export const COINFLIP_COMMAND = {
+  name: 'coinflip',
+  description: 'Flips a coin',
+  options: [
+    {
+      name: 'ephemeral',
+      description: 'Make the response ephemeral',
+      type: 5, // BOOLEAN
+      required: false,
+    },
+  ],
+};

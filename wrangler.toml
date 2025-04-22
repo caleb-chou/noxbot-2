@@ -11,6 +11,10 @@ compatibility_date = "2024-09-23"
 [observability.logs]
 enabled = true
 
-[[kv_namespaces]]
-binding = "noxbotdata"
-id = "5b30a3eedbb24bd1b9dee809ca012426"
+[[durable_objects.bindings]]
+name = "NOXBOT_DATA"
+class_name = "UserData"
+
+[[migrations]]
+tag = "v1" # Should be unique for each entry
+new_sqlite_classes = ["UserData"] # Array of new classes
