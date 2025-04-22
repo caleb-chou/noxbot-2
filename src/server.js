@@ -8,12 +8,13 @@ import {
   InteractionType,
   verifyKey,
 } from 'discord-interactions';
-import { COINFLIP_COMMAND, GET_USER_DATA, INVITE_COMMAND, TEST_COMMAND } from './commands.js';
+import { COINFLIP_COMMAND, GET_USER_DATA, INVITE_COMMAND, TEST_COMMAND, EIGHTBALL_COMMAND } from './commands.js';
 import { InteractionResponseFlags } from 'discord-interactions';
 import { createCoolRole, assignRole } from './functions/coolrole.js';
 import { UserData } from './resources/UserData.js';
 import { JsonResponse } from './util.js';
 import { coinFlip } from './functions/coinflip.js';
+import { eightBall } from './functions/eightball.js';
 import { isAdmin } from './util.js';
 
 
@@ -97,7 +98,17 @@ router.post('/', async (request, env) => {
           },
         });
       }
-      
+
+      case EIGHTBALL_COMMAND.name.toLowerCase(): {
+        const question = interaction.data.options?.find(
+          (option) => option.name === 'question',
+        )?.value;
+        const ephemeral = interaction.data.options?.find(
+          (option) => option.name === 'ephemeral',
+        )?.value;
+        return eightBall(question, interaction, ephemeral);
+      }
+
       case COINFLIP_COMMAND.name.toLowerCase(): {
         const ephemeral = interaction.data.options?.find(
           (option) => option.name === 'ephemeral',

@@ -36,3 +36,22 @@ export const COINFLIP_COMMAND = {
     },
   ],
 };
+
+export const EIGHTBALL_COMMAND = {
+  name: '8ball',
+  description: 'Ask the magic 8-ball a question',
+  options: [
+    {
+      name: 'question',
+      description: 'The question to ask the magic 8-ball',
+      type: 3, // STRING
+      required: true,
+    },
+    {
+      name: 'ephemeral',
+      description: 'Make the response ephemeral',
+      type: 5, // BOOLEAN
+      required: false,
+    },
+  ],
+};
