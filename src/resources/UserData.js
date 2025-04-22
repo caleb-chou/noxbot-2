@@ -28,7 +28,7 @@ export class UserData {
     if (pathname === '/set') {
       const data = await request.json();
       const [key, value] = Object.entries(data)[0];
-      if (!key || !value) {
+      if (!key || value === undefined) {
         return new Response('Invalid data', { status: 400 });
       }
       await this.state.storage.put(key, value);

@@ -83,7 +83,7 @@ router.post('/', async (request, env) => {
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({key: 'count'}),
+          body: JSON.stringify({ key: 'count' }),
         });
         const data = await res.json();
 
@@ -99,28 +99,55 @@ router.post('/', async (request, env) => {
       }
 
       case GET_STATS_COMMAND.name.toLowerCase(): {
-        const user = interaction.data.options?.find(
+        const userId = interaction.data.options?.find(
           (option) => option.name === 'user',
-        )?.value;
-
-        const id = env.NOXBOT_DATA.idFromName(user);
-        const stub = env.NOXBOT_DATA.get(id);
-        const res = await stub.fetch('https://dummy/get');
-        const data = await res.json();
-        console.log(data);
-
-        const ephemeral = interaction.data.options?.find(
-          (option) => option.name === 'ephemeral',
         )?.value;
 
         const stat = interaction.data.options?.find(
           (option) => option.name === 'stat',
         )?.value;
 
-        let body = {
+        const ephemeral = interaction.data.options?.find(
+          (option) => option.name === 'ephemeral',
+        )?.value;
+
+        const id = env.NOXBOT_DATA.idFromName(userId);
+        const stub = env.NOXBOT_DATA.get(id);
+        const res = await stub.fetch('https://dummy/get');
+        const data = await res.json();
+
+        // Basic embed setup
+        const embed = {
+          type: 'rich',
+          title: `📊 Stats for <@${userId}>`,
+          color: 0x5865f2, // blurple
+          fields: [],
+        };
+
+        if (stat) {
+          embed.fields.push({
+            name: stat,
+            value: `${data[stat] ?? '0'}`,
+            inline: true,
+          });
+        } else {
+          for (const [key, value] of Object.entries(data)) {
+            embed.fields.push({
+              name: key,
+              value: `${value}`,
+              inline: true,
+            });
+          }
+
+          if (embed.fields.length === 0) {
+            embed.description = 'No stats found for this user.';
+          }
+        }
+
+        const body = {
           type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
           data: {
-            content: `${JSON.stringify(stat ? data[stat] : data)}`,
+            embeds: [embed],
           },
         };
 
