@@ -4,11 +4,17 @@ import { JsonResponse } from '../util.js';
 
 export async function coinFlip(interaction, ephemeral) {
   const result = Math.random() < 0.5 ? 'Heads! 💿' : 'Tails! 📀';
-  const user = interaction.member.user.nick;
+  const user = interaction.member.user;
   let body = {
     type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
     data: {
-      content: `🪙 ${user} flipped...\n→ ${result}!`,
+        embeds: [
+            {
+              title: "🪙 Coin Flip",
+              description: `${user.username} flipped a...\n→ **${result}**`,
+              color: 0xFFD700, // gold-ish
+            }
+          ]
     },
   };
   if (ephemeral) {
