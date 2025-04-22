@@ -9,12 +9,12 @@ export class UserData {
 
     if (pathname === '/increment') {
       const data = await request.json();
-      if (!data.key || !data.value) {
+      if (!data.body) {
         return new Response('Invalid data', { status: 400 });
       }
-      let count = (await this.state.storage.get(data.key)) || 0;
+      let count = (await this.state.storage.get(data.body)) || 0;
       count++;
-      await this.state.storage.put(data.key, count);
+      await this.state.storage.put(data.body, count);
       return new Response(JSON.stringify({ count }));
     }
 
@@ -27,12 +27,14 @@ export class UserData {
 
     if (pathname === '/set') {
       const data = await request.json();
-      console.log(`${data}`)
-      if (!data.key || !data.value) {
+      const [key, value] = Object.entries(data)[0];
+      if (!key || !value) {
         return new Response('Invalid data', { status: 400 });
       }
-      await this.state.storage.put(data.key, data.value);
-      return new Response('Data set successfully', { status: 200 });
+      await this.state.storage.put(key, value);
+      return new Response(JSON.stringify({ [key]: value }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
 
     return new Response('Not found', { status: 404 });
