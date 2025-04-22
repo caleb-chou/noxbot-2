@@ -88,7 +88,7 @@ router.post('/', async (request, env) => {
         const id = env.NOXBOT_DATA.idFromName(interaction.member.user.id);
         console.log(id);
         const stub = env.NOXBOT_DATA.get(id);
-        const res = await stub.fetch('https://dummy/increment');
+        const res = await stub.fetch('https://dummy/increment', {method: 'POST', body: 'count'});
         const data = await res.json();
 
         console.log(data);
@@ -153,7 +153,7 @@ router.post('/', async (request, env) => {
         const stub = env.NOXBOT_DATA.get(id);
         const res = await stub.fetch('https://dummy/set', {
           method: 'POST',
-          body: `${stat}:${value}`,
+          body: `{${stat}:${value}}`,
         });
         const data = await res.json();
 
@@ -167,7 +167,7 @@ router.post('/', async (request, env) => {
         if (ephemeral) {
           body.data.flags = InteractionResponseFlags.EPHEMERAL;
         }
-        
+
         return new JsonResponse(body);
       }
 
