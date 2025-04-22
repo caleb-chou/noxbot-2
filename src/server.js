@@ -116,10 +116,22 @@ router.post('/', async (request, env) => {
         const res = await stub.fetch('https://dummy/get');
         const data = await res.json();
 
+        const resolvedUser = interaction.data.resolved?.users?.[userId];
+
+        const username = resolvedUser?.username;
+        const avatar = resolvedUser?.avatar;
+        
+        const avatarUrl = avatar
+          ? `https://cdn.discordapp.com/avatars/${userId}/${avatar}.png`
+          : `https://cdn.discordapp.com/embed/avatars/0.png`;
+
         // Basic embed setup
         const embed = {
           type: 'rich',
-          title: `📊 Stats for <@${userId}>`,
+          author: {
+            name: `Stats for ${username}`,
+            icon_url: avatarUrl,
+          },
           color: 0x5865f2, // blurple
           fields: [],
         };
