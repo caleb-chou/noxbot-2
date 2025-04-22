@@ -16,6 +16,7 @@ import {
   EIGHTBALL_COMMAND,
   GET_STATS_COMMAND,
   UPDATE_STATS_COMMAND,
+  DROP_STATS_COMMAND,
 } from './commands.js';
 import { InteractionResponseFlags } from 'discord-interactions';
 import { createCoolRole, assignRole } from './functions/coolrole.js';
@@ -120,7 +121,7 @@ router.post('/', async (request, env) => {
 
         const username = resolvedUser?.username;
         const avatar = resolvedUser?.avatar;
-        
+
         const avatarUrl = avatar
           ? `https://cdn.discordapp.com/avatars/${userId}/${avatar}.png`
           : `https://cdn.discordapp.com/embed/avatars/0.png`;
@@ -171,6 +172,19 @@ router.post('/', async (request, env) => {
       }
 
       case UPDATE_STATS_COMMAND.name.toLowerCase(): {
+        const hasAdmin =
+          (BigInt(interaction.member.permissions) & BigInt(0x00000008)) !== 0n; // ADMINISTRATOR bit
+
+        if (!hasAdmin) {
+          return new JsonResponse({
+            type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+            data: {
+              content: "You don't have permission to use this command.",
+              flags: InteractionResponseFlags.EPHEMERAL,
+            },
+          });
+        }
+
         const user = interaction.data.options?.find(
           (option) => option.name === 'user',
         )?.value;
@@ -206,6 +220,46 @@ router.post('/', async (request, env) => {
           body.data.flags = InteractionResponseFlags.EPHEMERAL;
         }
 
+        return new JsonResponse(body);
+      }
+
+      case DROP_STATS_COMMAND.name.toLowerCase(): {
+        const hasAdmin =
+          (BigInt(interaction.member.permissions) & BigInt(0x00000008)) !== 0n; // ADMINISTRATOR bit
+        if (!hasAdmin) {
+          return new JsonResponse({
+            type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+            data: {
+              content: "You don't have permission to use this command.",
+              flags: InteractionResponseFlags.EPHEMERAL,
+            },
+          });
+        }
+        const user = interaction.data.options?.find(
+          (option) => option.name === 'user',
+        )?.value;
+        const ephemeral = interaction.data.options?.find(
+          (option) => option.name === 'ephemeral',
+        )?.value;
+        const id = env.NOXBOT_DATA.idFromName(user);
+        const stub = env.NOXBOT_DATA.get(id);
+        const res = await stub.fetch('https://dummy/deleteAll', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+        const data = await res.json();
+        console.log(data);
+        let body = {
+          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+          data: {
+            content: `All stats for user ${user} have been deleted.`,
+          },
+        };
+        if (ephemeral) {
+          body.data.flags = InteractionResponseFlags.EPHEMERAL;
+        }
         return new JsonResponse(body);
       }
 

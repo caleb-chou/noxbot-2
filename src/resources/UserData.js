@@ -37,6 +37,13 @@ export class UserData {
       });
     }
 
+    if (pathname === '/deleteAll') {
+      await this.state.storage.deleteAll();
+      return new Response(JSON.stringify({ deleted: 'everything >:)' }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
     return new Response('Not found', { status: 404 });
   }
 }
