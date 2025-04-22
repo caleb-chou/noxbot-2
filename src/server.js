@@ -75,16 +75,6 @@ router.post('/', async (request, env) => {
       }
 
       case GET_USER_DATA.name.toLowerCase(): {
-        // if (!isAdmin(interaction)) {
-        //   return new JsonResponse({
-        //     type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-        //     data: {
-        //       content: `You can't do that!`,
-        //       flags: InteractionResponseFlags.EPHEMERAL,
-        //     }
-        //   });
-        // }
-        console.log('id part');
         const id = env.NOXBOT_DATA.idFromName(interaction.member.user.id);
         console.log(id);
         const stub = env.NOXBOT_DATA.get(id);
@@ -93,7 +83,7 @@ router.post('/', async (request, env) => {
           headers: {
             'Content-Type': 'application/json',
           },
-          body: 'count',
+          body: {key: 'count'},
         });
         const data = await res.json();
 

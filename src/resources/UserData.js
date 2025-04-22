@@ -9,12 +9,12 @@ export class UserData {
 
     if (pathname === '/increment') {
       const data = await request.json();
-      if (!data.body) {
+      if (!data.key) {
         return new Response('Invalid data', { status: 400 });
       }
-      let count = (await this.state.storage.get(data.body)) || 0;
+      let count = (await this.state.storage.get(data.key)) || 0;
       count++;
-      await this.state.storage.put(data.body, count);
+      await this.state.storage.put(data.key, count);
       return new Response(JSON.stringify({ count }));
     }
 
