@@ -153,7 +153,7 @@ router.post('/', async (request, env) => {
         const stub = env.NOXBOT_DATA.get(id);
         const res = await stub.fetch('https://dummy/set', {
           method: 'POST',
-          body: `{${stat}:${value}}`,
+          body: JSON.stringify({[stat]: value}),
         });
         const data = await res.json();
 
