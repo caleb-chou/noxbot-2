@@ -110,3 +110,22 @@ export const UPDATE_STATS_COMMAND = {
     },
   ],
 };
+
+export const DROP_STATS_COMMAND = {
+  name: 'dropstats',
+  description: 'Drop stats for a user',
+  options: [
+    {
+      name: 'user',
+      description: 'The user to drop stats for',
+      type: 6, // USER
+      required: true,
+    },
+    {
+      name: 'ephemeral',
+      description: 'Make the response ephemeral',
+      type: 5, // BOOLEAN
+      required: false,
+    },
+  ],
+};
