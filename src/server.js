@@ -83,7 +83,7 @@ router.post('/', async (request, env) => {
           headers: {
             'Content-Type': 'application/json',
           },
-          body: {key: 'count'},
+          body: JSON.stringify({key: 'count'}),
         });
         const data = await res.json();
 
