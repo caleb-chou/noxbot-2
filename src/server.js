@@ -15,6 +15,7 @@ import {
   TEST_COMMAND,
   EIGHTBALL_COMMAND,
   GET_STATS_COMMAND,
+  UPDATE_STATS_COMMAND,
 } from './commands.js';
 import { InteractionResponseFlags } from 'discord-interactions';
 import { createCoolRole, assignRole } from './functions/coolrole.js';
@@ -123,7 +124,7 @@ router.post('/', async (request, env) => {
         let body = {
           type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
           data: {
-            content: `${JSON.stringify(stat ? data[stat]: data)}`
+            content: `${JSON.stringify(stat ? data[stat] : data)}`,
           },
         };
 
@@ -131,6 +132,42 @@ router.post('/', async (request, env) => {
           body.data.flags = InteractionResponseFlags.EPHEMERAL;
         }
 
+        return new JsonResponse(body);
+      }
+
+      case UPDATE_STATS_COMMAND.name.toLowerCase(): {
+        const user = interaction.data.options?.find(
+          (option) => option.name === 'user',
+        )?.value;
+        const stat = interaction.data.options?.find(
+          (option) => option.name === 'stat',
+        )?.value;
+        const value = interaction.data.options?.find(
+          (option) => option.name === 'value',
+        )?.value;
+        const ephemeral = interaction.data.options?.find(
+          (option) => option.name === 'ephemeral',
+        )?.value;
+
+        const id = env.NOXBOT_DATA.idFromName(user);
+        const stub = env.NOXBOT_DATA.get(id);
+        const res = await stub.fetch('https://dummy/set', {
+          method: 'POST',
+          body: `${stat}:${value}`,
+        });
+        const data = await res.json();
+
+        let body = {
+          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+          data: {
+            content: `${JSON.stringify(stat ? data[stat] : data)}`,
+          },
+        };
+
+        if (ephemeral) {
+          body.data.flags = InteractionResponseFlags.EPHEMERAL;
+        }
+        
         return new JsonResponse(body);
       }
 
