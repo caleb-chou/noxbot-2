@@ -53,7 +53,7 @@ export async function eightBall(question, interaction, ephemeral) {
               ? `https://cdn.discordapp.com/avatars/${interaction.member.user.id}/${interaction.member.user.avatar}.png`
               : undefined,
           },
-          description: `🎱 8Ball says...\n→ **${result.answer}**`,
+          description: `🎱 8Ball says...\n→ **${result[0]}**`,
           color: color, // gold-ish
         },
       ],
