@@ -13,9 +13,29 @@ export const TEST_COMMAND = {
   description: 'Test command',
 };
 
-export const GET_USER_DATA = {
-  name: 'getuserdata',
+export const INCREMENT_STATS_COMMAND = {
+  name: 'incrementuserdata',
   description: 'Fetches data for user',
+  options: [
+    {
+      name: 'user',
+      description: 'The user to get data for',
+      type: 6, // USER
+      required: true,
+    },
+    {
+      name: 'ephemeral',
+      description: 'Make the response ephemeral',
+      type: 5, // BOOLEAN
+      required: false,
+    },
+    {
+      name: 'stat',
+      description: 'The stat to increment',
+      type: 3, // STRING
+      required: false,
+    }
+  ]
 };
 
 export const SET_USER_DATA = {

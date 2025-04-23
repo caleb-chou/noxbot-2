@@ -10,7 +10,7 @@ import {
 } from 'discord-interactions';
 import {
   COINFLIP_COMMAND,
-  GET_USER_DATA,
+  INCREMENT_STATS_COMMAND,
   INVITE_COMMAND,
   TEST_COMMAND,
   EIGHTBALL_COMMAND,
@@ -24,7 +24,6 @@ import { UserData } from './resources/UserData.js';
 import { JsonResponse } from './util.js';
 import { coinFlip } from './functions/coinflip.js';
 import { eightBall } from './functions/eightball.js';
-import { isAdmin } from './util.js';
 
 const router = AutoRouter();
 
@@ -75,8 +74,32 @@ router.post('/', async (request, env) => {
         });
       }
 
-      case GET_USER_DATA.name.toLowerCase(): {
-        const id = env.NOXBOT_DATA.idFromName(interaction.member.user.id);
+      case INCREMENT_STATS_COMMAND.name.toLowerCase(): {
+        const hasAdmin =
+          (BigInt(interaction.member.permissions) & BigInt(0x00000008)) !== 0n; // ADMINISTRATOR bit
+        if (!hasAdmin) {
+          return new JsonResponse({
+            type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+            data: {
+              content: "You don't have permission to use this command.",
+              flags: InteractionResponseFlags.EPHEMERAL,
+            },
+          });
+        }
+        const user = interaction.data.options?.find(
+          (option) => option.name === 'user',
+        )?.value;
+        const stat = interaction.data.options?.find(
+          (option) => option.name === 'stat',
+        )?.value;
+        const ephemeral = interaction.data.options?.find(
+          (option) => option.name === 'ephemeral',
+        )?.value;
+
+        const resolvedUser = interaction.data.resolved?.users?.[user];
+        const username = resolvedUser?.username;
+
+        const id = env.NOXBOT_DATA.idFromName(user);
         console.log(id);
         const stub = env.NOXBOT_DATA.get(id);
         const res = await stub.fetch('https://dummy/increment', {
@@ -84,19 +107,23 @@ router.post('/', async (request, env) => {
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ key: 'count' }),
+          body: JSON.stringify({ key: stat }),
         });
         const data = await res.json();
 
         console.log(data);
 
-        return new JsonResponse({
+        let body = {
           type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
           data: {
-            content: `This is a test ${JSON.stringify(data)}`,
+            content: `Incremented stat ${stat} to ${data[stat]} for user ${username}.`,
             flags: InteractionResponseFlags.EPHEMERAL,
           },
-        });
+        };
+        if (ephemeral) {
+          body.data.flags = InteractionResponseFlags.EPHEMERAL;
+        }
+        return new JsonResponse(body);
       }
 
       case GET_STATS_COMMAND.name.toLowerCase(): {
