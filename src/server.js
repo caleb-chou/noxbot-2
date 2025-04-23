@@ -198,6 +198,10 @@ router.post('/', async (request, env) => {
           (option) => option.name === 'ephemeral',
         )?.value;
 
+        const resolvedUser = interaction.data.resolved?.users?.[user];
+
+        const username = resolvedUser?.username;
+
         const id = env.NOXBOT_DATA.idFromName(user);
         const stub = env.NOXBOT_DATA.get(id);
         const res = await stub.fetch('https://dummy/set', {
@@ -212,7 +216,7 @@ router.post('/', async (request, env) => {
         let body = {
           type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
           data: {
-            content: `${JSON.stringify(stat ? data[stat] : data)}`,
+            content: `Set stat ${stat} to ${data[stat]} for user ${username}.`,
           },
         };
 
