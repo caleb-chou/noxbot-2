@@ -44,6 +44,67 @@ export class UserData {
       });
     }
 
+    if (pathname === '/addToMailbox') {
+      const mail = await request.json();
+      const mailbox = (await this.state.storage.get('mailbox')) || [];
+      
+      if (mailbox.length >= 10) {
+        return new Response(
+          JSON.stringify({ error: 'Mailbox is full. Max 10 messages allowed.' }),
+          { status: 400, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      mailbox.push(mail);
+      console.log(mailbox)
+      await this.state.storage.put('mailbox', mailbox);
+      return new Response(JSON.stringify({ success: true, message: 'Mail Sent.' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (pathname === '/getMailbox' && request.method === 'GET') {
+      const mailbox = (await this.state.storage.get('mailbox')) || [];
+
+      return new Response(JSON.stringify({
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+        mailbox: mailbox
+      }));
+    }
+
+    if (pathname === '/deleteMail' && request.method === 'POST') {
+      const data = await request.json();
+      const index = data.index;
+    
+      let mailbox = (await this.state.storage.get('mailbox')) || [];
+    
+      if (index === undefined || index === null) {
+        // No index provided → clear mailbox
+        await this.state.storage.put('mailbox', []);
+        return new Response(JSON.stringify({ success: true, message: 'Mailbox cleared.' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+    
+      if (typeof index !== 'number' || index < 0 || index >= mailbox.length) {
+        return new Response(JSON.stringify({ error: 'Invalid or out of bounds index.' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+    
+      mailbox.splice(index, 1); // Remove the specific mail
+    
+      await this.state.storage.put('mailbox', mailbox);
+    
+      return new Response(JSON.stringify({ success: true, message: 'Mail deleted.' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
     return new Response('Not found', { status: 404 });
   }
 }

@@ -17,13 +17,16 @@ import {
   GET_STATS_COMMAND,
   UPDATE_STATS_COMMAND,
   DROP_STATS_COMMAND,
+  SEND_MAIL_COMMAND,
+  CHECK_MAILBOX_COMMAND,
 } from './commands.js';
 import { InteractionResponseFlags } from 'discord-interactions';
 import { createCoolRole, assignRole } from './functions/coolrole.js';
 import { UserData } from './resources/UserData.js';
-import { JsonResponse } from './util.js';
+import { JsonResponse, fetchFullUserDetails } from './util.js';
 import { coinFlip } from './functions/coinflip.js';
 import { eightBall } from './functions/eightball.js';
+import { createMailboxModal, createMailboxEmbed } from './functions/mailbox.js';
 
 const router = AutoRouter();
 
@@ -56,6 +59,51 @@ router.post('/', async (request, env) => {
     return new JsonResponse({
       type: InteractionResponseType.PONG,
     });
+  }
+
+  if (interaction.type === InteractionType.MODAL_SUBMIT) {
+    if (interaction.data.custom_id === 'mailbox_modal') {
+      const recipient = interaction.data.components?.[0]?.components?.find(
+        (component) => component.custom_id === 'recipient_input'
+      )?.value;
+
+      const subject = interaction.data.components?.[1]?.components?.find(
+        (component) => component.custom_id === 'subject_input'
+      )?.value;
+
+      const message = interaction.data.components?.[2]?.components?.find(
+        (component) => component.custom_id === 'message_input'
+      )?.value;
+
+      const mail = {
+        sender: interaction.member.user.username,
+        subject: subject,
+        message: message,
+        timestamp: new Date().toISOString(),
+      }
+
+      console.log(JSON.stringify(interaction.data))
+
+      const id = env.NOXBOT_DATA.idFromName(recipient);
+      const stub = env.NOXBOT_DATA.get(id);
+
+      const res = await stub.fetch('https://dummy/addToMailbox', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(mail),
+      });
+      const response = await res.json();
+
+      return (new JsonResponse({
+        type: 4,
+        data: {
+          content: response.message,
+          flags: InteractionResponseFlags.EPHEMERAL
+        }
+      }))
+    }
   }
 
   if (interaction.type === InteractionType.APPLICATION_COMMAND) {
@@ -309,6 +357,23 @@ router.post('/', async (request, env) => {
           (option) => option.name === 'ephemeral',
         )?.value;
         return coinFlip(interaction, ephemeral);
+      }
+
+      case SEND_MAIL_COMMAND.name.toLowerCase(): {
+        return new JsonResponse(createMailboxModal())
+      }
+
+      case CHECK_MAILBOX_COMMAND.name.toLowerCase(): {
+        const user = interaction.member.user;
+        const id = env.NOXBOT_DATA.idFromName(user.id);
+        const stub = env.NOXBOT_DATA.get(id);
+
+        const res = await stub.fetch('https://dummy/getMailbox');
+
+        const response = await res.json()
+        console.log(response)
+
+        return new JsonResponse(createMailboxEmbed(user, response.mailbox))
       }
 
       case TEST_COMMAND.name.toLowerCase(): {

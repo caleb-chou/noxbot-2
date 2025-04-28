@@ -149,3 +149,31 @@ export const DROP_STATS_COMMAND = {
     },
   ],
 };
+
+export const CHECK_MAILBOX_COMMAND = {
+  name: 'checkmail',
+  description: 'Check your mailbox!',
+}
+
+export const SEND_MAIL_COMMAND = {
+  name: 'sendmail',
+  description: 'Send mail to somebody!'
+}
+
+export const DELETE_MAIL_COMMAND = {
+  name: 'deletemail',
+  description: 'Delete mail!',
+  options: [
+    {
+      name: 'mailid',
+      description: 'Which mail to delete',
+      type: 4,
+      required: false
+    }
+  ]
+}
+
+export const PICK_RANDOM_USER_COMMAND = {
+  name: 'choosesomeone',
+  description: 'Pick someone random!'
+}
