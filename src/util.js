@@ -9,3 +9,22 @@ export class JsonResponse extends Response {
     super(jsonBody, init);
   }
 }
+
+export async function fetchFullUserDetails(userId) {
+  const token = 'YOUR_BOT_TOKEN';  // Your bot's token
+  const url = `https://discord.com/api/v10/users/${userId}`;
+
+  const response = await fetch(url, {
+    method: 'GET',
+    headers: {
+      'Authorization': `Bot ${token}`,
+    },
+  });
+
+  if (!response.ok) {
+    throw new Error('Failed to fetch user data');
+  }
+
+  const user = await response.json();
+  return user;
+}
