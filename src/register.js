@@ -11,6 +11,8 @@ import {
   SEND_MAIL_COMMAND,
   TEST_COMMAND,
   UPDATE_STATS_COMMAND,
+  UPDATE_SETTINGS_COMMAND,
+  GET_SETTINGS_COMMAND
 } from './commands.js';
 import dotenv from 'dotenv';
 import process from 'node:process';
@@ -59,7 +61,9 @@ const response = await fetch(url, {
     CHECK_MAILBOX_COMMAND,
     SEND_MAIL_COMMAND,
     DELETE_MAIL_COMMAND,
-    PICK_RANDOM_USER_COMMAND
+    PICK_RANDOM_USER_COMMAND,
+    UPDATE_SETTINGS_COMMAND,
+    GET_SETTINGS_COMMAND,
   ]),
 });
 

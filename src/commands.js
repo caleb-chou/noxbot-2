@@ -157,7 +157,15 @@ export const CHECK_MAILBOX_COMMAND = {
 
 export const SEND_MAIL_COMMAND = {
   name: 'sendmail',
-  description: 'Send mail to somebody!'
+  description: 'Send mail to somebody!',
+  options: [
+    {
+      name: 'user',
+      description: 'The user to send mail to',
+      type: 6, // USER
+      required: false,
+    }
+  ]
 }
 
 export const DELETE_MAIL_COMMAND = {
@@ -165,7 +173,7 @@ export const DELETE_MAIL_COMMAND = {
   description: 'Delete mail!',
   options: [
     {
-      name: 'mailid',
+      name: 'index',
       description: 'Which mail to delete',
       type: 4,
       required: false
@@ -176,4 +184,28 @@ export const DELETE_MAIL_COMMAND = {
 export const PICK_RANDOM_USER_COMMAND = {
   name: 'choosesomeone',
   description: 'Pick someone random!'
+}
+
+export const UPDATE_SETTINGS_COMMAND = {
+  name: 'updatesettings',
+  description: 'Update your settings for the bot!',
+  options: [
+    {
+      name: 'setting',
+      description: 'Which setting to change',
+      type: 3,
+      required: true
+    },
+    {
+      name: 'value',
+      description: 'Which value to change to',
+      type: 3,
+      required: true
+    }
+  ]
+}
+
+export const GET_SETTINGS_COMMAND = {
+  name: 'getsettings',
+  description: 'Get your settings for the bot!',
 }

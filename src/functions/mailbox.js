@@ -1,4 +1,4 @@
-export function createMailboxModal() {
+export function createMailboxModal(user) {
     return {
         type: 9, // InteractionResponseType.MODAL
         data: {
@@ -17,6 +17,7 @@ export function createMailboxModal() {
                             max_length: 100,
                             required: true,
                             placeholder: 'Enter a user\'s unique id',
+                            value: user?.id || undefined
                         },
                     ],
                 },

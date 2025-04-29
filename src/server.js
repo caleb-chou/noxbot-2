@@ -19,11 +19,14 @@ import {
   DROP_STATS_COMMAND,
   SEND_MAIL_COMMAND,
   CHECK_MAILBOX_COMMAND,
+  GET_SETTINGS_COMMAND,
+  UPDATE_SETTINGS_COMMAND,
+  DELETE_MAIL_COMMAND,
 } from './commands.js';
 import { InteractionResponseFlags } from 'discord-interactions';
 import { createCoolRole, assignRole } from './functions/coolrole.js';
 import { UserData } from './resources/UserData.js';
-import { JsonResponse, fetchFullUserDetails } from './util.js';
+import { JsonResponse, sendMailNotification} from './util.js';
 import { coinFlip } from './functions/coinflip.js';
 import { eightBall } from './functions/eightball.js';
 import { createMailboxModal, createMailboxEmbed } from './functions/mailbox.js';
@@ -96,6 +99,19 @@ router.post('/', async (request, env) => {
       });
       const response = await res.json();
 
+      const shouldNotify = await stub.fetch('https://dummy/getSettings', {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        }
+      });
+      const userSettings = await shouldNotify.json();
+
+      console.log(userSettings)
+      if (userSettings.notifyForMail === 'true') {
+        await sendMailNotification(recipient, env)
+      }
+
       return (new JsonResponse({
         type: 4,
         data: {
@@ -148,7 +164,6 @@ router.post('/', async (request, env) => {
         const username = resolvedUser?.username;
 
         const id = env.NOXBOT_DATA.idFromName(user);
-        console.log(id);
         const stub = env.NOXBOT_DATA.get(id);
         const res = await stub.fetch('https://dummy/increment', {
           method: 'POST',
@@ -360,7 +375,13 @@ router.post('/', async (request, env) => {
       }
 
       case SEND_MAIL_COMMAND.name.toLowerCase(): {
-        return new JsonResponse(createMailboxModal())
+        const user = interaction.data.options?.find(
+          (option) => option.name === 'user',
+        )?.value;
+
+        const resolvedUser = interaction.data.resolved?.users?.[user];
+
+        return new JsonResponse(createMailboxModal(resolvedUser))
       }
 
       case CHECK_MAILBOX_COMMAND.name.toLowerCase(): {
@@ -371,9 +392,86 @@ router.post('/', async (request, env) => {
         const res = await stub.fetch('https://dummy/getMailbox');
 
         const response = await res.json()
-        console.log(response)
 
         return new JsonResponse(createMailboxEmbed(user, response.mailbox))
+      }
+
+      case DELETE_MAIL_COMMAND.name.toLowerCase() : {
+        const index = interaction.data.options?.find(
+          (option) => option.name === 'index',
+        )?.value;
+
+        const user = interaction.member.user;
+        const id = env.NOXBOT_DATA.idFromName(user.id);
+        const stub = env.NOXBOT_DATA.get(id);
+
+        const res = await stub.fetch('https://dummy/deleteMail', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({index : index || -1})
+        });
+
+        const response = await res.json()
+
+        return new JsonResponse({
+          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+          data: {
+            content: `${response.message}`,
+            flags: InteractionResponseFlags.EPHEMERAL,
+          },
+        })
+      }
+
+      case GET_SETTINGS_COMMAND.name.toLowerCase() : {
+        const user = interaction.member.user;
+        const id = env.NOXBOT_DATA.idFromName(user.id);
+        const stub = env.NOXBOT_DATA.get(id);
+
+        const res = await stub.fetch('https://dummy/getSettings')
+
+        const response = await res.json()
+
+        return new JsonResponse({
+          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+          data: {
+            content: `${JSON.stringify(response)}`,
+            flags: InteractionResponseFlags.EPHEMERAL,
+          },
+        })
+      }
+
+      case UPDATE_SETTINGS_COMMAND.name.toLowerCase(): {
+        const setting = interaction.data.options?.find(
+          (option) => option.name === 'setting',
+        )?.value;
+        const value = interaction.data.options?.find(
+          (option) => option.name === 'value',
+        )?.value;
+
+        const user = interaction.member.user;
+        const id = env.NOXBOT_DATA.idFromName(user.id);
+        const stub = env.NOXBOT_DATA.get(id);
+
+        const res = await stub.fetch('https://dummy/updateSettings', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({[setting] : value})
+        });
+
+        const response = await res.json()
+
+        return new JsonResponse({
+          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+          data: {
+            content: `Updated the ${setting} value to ${value}`,
+            flags: InteractionResponseFlags.EPHEMERAL,
+          },
+        })
+
       }
 
       case TEST_COMMAND.name.toLowerCase(): {
