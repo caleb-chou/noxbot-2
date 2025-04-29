@@ -47,7 +47,7 @@ export class UserData {
     if (pathname === '/addToMailbox') {
       const mail = await request.json();
       const mailbox = (await this.state.storage.get('mailbox')) || [];
-      
+
       if (mailbox.length >= 10) {
         return new Response(
           JSON.stringify({ error: 'Mailbox is full. Max 10 messages allowed.' }),
@@ -76,9 +76,9 @@ export class UserData {
     if (pathname === '/deleteMail' && request.method === 'POST') {
       const data = await request.json();
       const index = data.index;
-    
+
       let mailbox = (await this.state.storage.get('mailbox')) || [];
-    
+
       if (index === undefined || index === null) {
         // No index provided → clear mailbox
         await this.state.storage.put('mailbox', []);
@@ -87,22 +87,39 @@ export class UserData {
           headers: { 'Content-Type': 'application/json' },
         });
       }
-    
+
       if (typeof index !== 'number' || index < 0 || index >= mailbox.length) {
         return new Response(JSON.stringify({ error: 'Invalid or out of bounds index.' }), {
           status: 400,
           headers: { 'Content-Type': 'application/json' },
         });
       }
-    
+
       mailbox.splice(index, 1); // Remove the specific mail
-    
+
       await this.state.storage.put('mailbox', mailbox);
-    
+
       return new Response(JSON.stringify({ success: true, message: 'Mail deleted.' }), {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       });
+    }
+
+    if (pathname === '/getSettings') {
+      const settings = await (this.state.storage.get('settings')) || {};
+      return new Response(JSON.stringify(settings))
+    }
+
+    if (pathname === '/updateSettings') {
+      const settings = await (this.state.storage.get('settings')) || {};
+      const data = await request.json()
+      const [key, value] = Object.entries(data)[0];
+
+      settings[key] = value;
+
+      await this.state.storage.put('settings', settings);
+
+      return new Response(JSON.stringify(settings))
     }
 
     return new Response('Not found', { status: 404 });
