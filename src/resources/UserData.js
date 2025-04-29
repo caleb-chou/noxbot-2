@@ -79,7 +79,7 @@ export class UserData {
 
       let mailbox = (await this.state.storage.get('mailbox')) || [];
 
-      if (index > 0) {
+      if (index < 0) {
         // No index provided → clear mailbox
         await this.state.storage.put('mailbox', []);
         return new Response(JSON.stringify({ success: true, message: 'Mailbox cleared.' }), {
