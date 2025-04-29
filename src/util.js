@@ -41,6 +41,7 @@ export async function sendMailNotification(recipientId, env) {
     },
     body: JSON.stringify({
       content: `📬 You have new mail waiting for you! Check it with the \`/checkmail\` command!`,
+      flags: InteractionResponseFlags.EPHEMERAL,
     }),
   });
 
