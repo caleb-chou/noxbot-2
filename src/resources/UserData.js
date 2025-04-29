@@ -75,11 +75,11 @@ export class UserData {
 
     if (pathname === '/deleteMail' && request.method === 'POST') {
       const data = await request.json();
-      const index = data.index;
+      const index = data.index - 1;
 
       let mailbox = (await this.state.storage.get('mailbox')) || [];
 
-      if (index === undefined || index === null) {
+      if (index > 0) {
         // No index provided → clear mailbox
         await this.state.storage.put('mailbox', []);
         return new Response(JSON.stringify({ success: true, message: 'Mailbox cleared.' }), {

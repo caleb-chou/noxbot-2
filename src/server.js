@@ -21,6 +21,7 @@ import {
   CHECK_MAILBOX_COMMAND,
   GET_SETTINGS_COMMAND,
   UPDATE_SETTINGS_COMMAND,
+  DELETE_MAIL_COMMAND,
 } from './commands.js';
 import { InteractionResponseFlags } from 'discord-interactions';
 import { createCoolRole, assignRole } from './functions/coolrole.js';
@@ -388,11 +389,39 @@ router.post('/', async (request, env) => {
         const id = env.NOXBOT_DATA.idFromName(user.id);
         const stub = env.NOXBOT_DATA.get(id);
 
-        const res = await stub.fetch('https://dummy/getSettings');
+        const res = await stub.fetch('https://dummy/getMailbox');
 
         const response = await res.json()
 
-        return new JsonResponse(response)
+        return new JsonResponse(createMailboxEmbed(user, response.mailbox))
+      }
+
+      case DELETE_MAIL_COMMAND.name.toLowerCase() : {
+        const index = interaction.data.options?.find(
+          (option) => option.name === 'index',
+        )?.value;
+
+        const user = interaction.member.user;
+        const id = env.NOXBOT_DATA.idFromName(user.id);
+        const stub = env.NOXBOT_DATA.get(id);
+
+        const res = await stub.fetch('https://dummy/deleteMail', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({index : index || -1})
+        });
+
+        const response = await res.json()
+
+        return new JsonResponse({
+          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+          data: {
+            content: `${response.message}`,
+            flags: InteractionResponseFlags.EPHEMERAL,
+          },
+        })
       }
 
       case GET_SETTINGS_COMMAND.name.toLowerCase() : {

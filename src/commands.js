@@ -173,7 +173,7 @@ export const DELETE_MAIL_COMMAND = {
   description: 'Delete mail!',
   options: [
     {
-      name: 'mailid',
+      name: 'index',
       description: 'Which mail to delete',
       type: 4,
       required: false
