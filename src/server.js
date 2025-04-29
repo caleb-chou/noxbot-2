@@ -385,7 +385,7 @@ router.post('/', async (request, env) => {
       }
 
       case CHECK_MAILBOX_COMMAND.name.toLowerCase(): {
-        const user = interaction.member.user;
+        const user = interaction.member?.user || interaction.user;
         const id = env.NOXBOT_DATA.idFromName(user.id);
         const stub = env.NOXBOT_DATA.get(id);
 
