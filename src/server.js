@@ -22,6 +22,7 @@ import {
   GET_SETTINGS_COMMAND,
   UPDATE_SETTINGS_COMMAND,
   DELETE_MAIL_COMMAND,
+  LENGTHWAVE_COMMAND,
 } from './commands.js';
 import { InteractionResponseFlags } from 'discord-interactions';
 import { createCoolRole, assignRole } from './functions/coolrole.js';
@@ -29,6 +30,7 @@ import { UserData } from './resources/UserData.js';
 import { JsonResponse, sendMailNotification} from './util.js';
 import { coinFlip } from './functions/coinflip.js';
 import { eightBall } from './functions/eightball.js';
+import { generate_gamut, generate_message_embed } from './functions/lengthwave.js';
 import { createMailboxModal, createMailboxEmbed } from './functions/mailbox.js';
 
 const router = AutoRouter();
@@ -471,7 +473,15 @@ router.post('/', async (request, env) => {
             flags: InteractionResponseFlags.EPHEMERAL,
           },
         })
+      }
 
+      case LENGTHWAVE_COMMAND.name.toLowerCase(): {
+        const prompts= [["cool", "not cool"]];
+        return new JsonResponse(
+          generate_message_embed(
+            prompts
+          )
+        );
       }
 
       case TEST_COMMAND.name.toLowerCase(): {

@@ -12,7 +12,8 @@ import {
   TEST_COMMAND,
   UPDATE_STATS_COMMAND,
   UPDATE_SETTINGS_COMMAND,
-  GET_SETTINGS_COMMAND
+  GET_SETTINGS_COMMAND,
+  LENGTHWAVE_COMMAND
 } from './commands.js';
 import dotenv from 'dotenv';
 import process from 'node:process';
@@ -64,6 +65,7 @@ const response = await fetch(url, {
     PICK_RANDOM_USER_COMMAND,
     UPDATE_SETTINGS_COMMAND,
     GET_SETTINGS_COMMAND,
+    LENGTHWAVE_COMMAND
   ]),
 });
 
