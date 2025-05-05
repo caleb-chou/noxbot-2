@@ -219,6 +219,18 @@ export const LENGTHWAVE_COMMAND = {
       description: 'What category should be the prompts be from?',
       type: 3,
       required: false
+    },
+    {
+      name: 'left',
+      description: 'Left Custom Prompt',
+      type: 3,
+      required: false
+    },
+    {
+      name: 'right',
+      description: 'Right Custom Prompt',
+      type: 3,
+      required: false
     }
   ]
 }
