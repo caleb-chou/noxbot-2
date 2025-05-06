@@ -56,7 +56,7 @@ function generate_gamut_result_string(position, guess) {
             gamut_string += `🟨`
         else
             gamut_string += `⬛`
-        if (0.05 * (i + 1) >= guess && 0.05 * (i + 1) < guess + 0.05) {
+        if (Math.abs(0.05 * (i + 1) - position) < 0.025) {
             gamut_string += ` < Your guess ${guess}`;
         }
         if (i % 5 === 4)
