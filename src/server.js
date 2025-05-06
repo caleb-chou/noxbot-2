@@ -30,7 +30,7 @@ import { UserData } from './resources/UserData.js';
 import { JsonResponse, sendMailNotification } from './util.js';
 import { coinFlip } from './functions/coinflip.js';
 import { eightBall } from './functions/eightball.js';
-import { createLengthWaveClueModal, createLengthWaveGuessModal, generate_gamut, generate_guesser_message_embed, generate_message_embed } from './functions/lengthwave.js';
+import { ALL_PROMPTS, createLengthWaveClueModal, createLengthWaveGuessModal, generate_gamut, generate_guess_response_message_embed, generate_guesser_message_embed, generate_message_embed, PROMPTS } from './functions/lengthwave.js';
 import { createMailboxModal, createMailboxEmbed } from './functions/mailbox.js';
 
 const router = AutoRouter();
@@ -138,6 +138,26 @@ router.post('/', async (request, env) => {
       game_data.clue = clue;
       console.log(game_data)
       const message = generate_guesser_message_embed(game_id, game_data, interaction.member.user);
+
+
+
+      return new JsonResponse(message);
+    }
+
+    if (interaction.data.custom_id.startsWith('lengthwave_guess_modal')) {
+      const game_id = interaction.data.custom_id.split('|')[1];
+      const guess_value = interaction.data.components?.[0]?.components?.find(
+        (component) => component.custom_id === 'guess_input'
+      )?.value;
+
+      const id = env.NOXBOT_DATA.idFromName('lengthwave');
+      const stub = env.NOXBOT_DATA.get(id);
+      const res = await stub.fetch(`https://dummy/lengthwave?gameId=${game_id}`, {
+        method: 'GET',
+      });
+      const game_data = await res.json();
+      console.log(game_data)
+      const message = generate_guess_response_message_embed(game_id, game_data, guess_value);
 
       return new JsonResponse(message);
     }
@@ -523,7 +543,13 @@ router.post('/', async (request, env) => {
       }
 
       case LENGTHWAVE_COMMAND.name.toLowerCase(): {
-        const prompts = [["cool", "not cool"]];
+        const prompts_category = interaction.data.options?.find(
+          (option) => option.name === 'category',
+        )?.value;
+
+        const selected = (prompts_category) ? PROMPTS[prompts_category] : undefined;
+        const prompts = selected ? selected : ALL_PROMPTS[Math.floor(Math.random() * ALL_PROMPTS.length)];
+        console.log(prompts)
         const response_body = generate_message_embed(
           prompts
         );

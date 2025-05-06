@@ -1,21 +1,35 @@
-import { text } from "itty-router";
-
-const PROMPTS = {
+export const PROMPTS = {
     base: [
         ["normal", "weird"],
         ["funny", "sad"]
-    ]
+    ],
+    advanced: [
+        ["happy", "angry"],
+        ["fast", "slow"],
+        ["hot", "cold"],
+        ["light", "dark"],
+        ["hard", "soft"],
+        ["big", "small"],
+        ["easy", "difficult"],
+        ["clean", "dirty"],
+        ["cheap", "expensive"],
+        ["new", "old"],
+        ["young", "old"]
+    ],
 }
+
+export const ALL_PROMPTS = Object.values(PROMPTS).map((prompt) => prompt.map((p) => p))
 
 function generate_gamut_string(position) {
     let gamut_string = '';
     for (let i = 0; i < 19; i++) {
-        if (0.05 * (i + 1) > position && 0.05 * (i + 1) < position + 0.05) {
-            gamut_string += `🟦 < ${position}`;
+        if (Math.abs(0.05 * (i + 1) - position) < 0.025) {
+            gamut_string += `🟦 < ${Math.trunc(position * 1000) / 1000}\n`;
+            continue;
         }
-        else if ((0.05 * (i + 1) > position + 0.05 && 0.05 * (i + 1) < position + 0.1) || (0.05 * (i + 1) < position && 0.05 * (i + 1) > position - 0.05))
+        else if (Math.abs(0.05 * (i + 1) - position) < 0.075)
             gamut_string += `🟧`
-        else if ((0.05 * (i + 1) > position + 0.1 && 0.05 * (i + 1) < position + 0.15) || (0.05 * (i + 1) < position - 0.05 && 0.05 * (i + 1) > position - 0.1))
+        else if (Math.abs(0.05 * (i + 1) - position) < 0.125)
             gamut_string += `🟨`
         else
             gamut_string += `⬛`
@@ -26,9 +40,31 @@ function generate_gamut_string(position) {
     return gamut_string;
 }
 
+function generate_gamut_result_string(position, guess) {
+    let gamut_string = '';
+    for (let i = 0; i < 20; i++) {
+        if (Math.abs(0.05 * (i + 1) - position) < 0.025) {
+            gamut_string += `🟦 < Actual ${Math.trunc(position * 1000) / 1000}`;
+        }
+        else if (Math.abs(0.05 * (i + 1) - position) < 0.075)
+            gamut_string += `🟧`
+        else if (Math.abs(0.05 * (i + 1) - position) < 0.125)
+            gamut_string += `🟨`
+        else
+            gamut_string += `⬛`
+        if (0.05 * (i + 1) >= guess && 0.05 * (i + 1) < guess + 0.05) {
+            gamut_string += ` < Your guess ${guess}`;
+        }
+        if (i % 5 === 4)
+            gamut_string += ` < ${(i + 1) * 0.05}`
+        gamut_string += "\n";
+    }
+    return gamut_string;
+}
+
 function generate_guess_gamut_string() {
     let gamut_string = '';
-    for (let i = 0; i < 19; i++) {
+    for (let i = 0; i < 20; i++) {
         gamut_string += `⬛`
         if (i % 5 === 4)
             gamut_string += ` < ${(i + 1) * 0.05}`
@@ -135,6 +171,43 @@ export function generate_guesser_message_embed(game_id, game_data, user) {
         }
     }
     return message;
+}
+
+export function generate_guess_response_message_embed(game_id, game_data, guess_value) {
+    const { prompt } = game_data;
+    const { left, right } = prompt;
+    const guess = parseFloat(guess_value);
+    const distance = Math.abs(game_data.position - (Number.isNaN(guess) ? 0 : guess));
+
+    const message = {
+        type: 4, // CHANNEL_MESSAGE_WITH_SOURCE
+        data: {
+            embeds: [
+                {
+                    description: `||${left}\n${generate_gamut_result_string(game_data.position, guess)}${right}\n\n**Your guess was ${guess}**\n**Distance: ${distance}**\n**Score: ${calculate_score(distance)}**||`,
+                    color: 0x5865F2,
+                    footer: {
+                        text: `${game_id}`
+                    }
+                }
+            ], 
+            // flags: 64,
+        },
+
+    }
+    return message;
+}
+
+export function calculate_score(distance) {
+    if (distance < 0.025) {
+        return 4;
+    } else if (distance < 0.075) {
+        return 3;
+    } else if (distance < 0.125) {
+        return 2;
+    } else {
+        return 0;
+    }
 }
 
 export function createLengthWaveClueModal(game_id) {
