@@ -1,21 +1,25 @@
 export const PROMPTS = {
     base: [
         ["normal", "weird"],
-        ["funny", "sad"]
-    ],
-    advanced: [
-        ["happy", "angry"],
-        ["fast", "slow"],
+        ["funny", "sad"],
         ["hot", "cold"],
         ["light", "dark"],
         ["hard", "soft"],
         ["big", "small"],
         ["easy", "difficult"],
-        ["clean", "dirty"],
         ["cheap", "expensive"],
-        ["new", "old"],
-        ["young", "old"]
     ],
+    advanced: [
+        ["red flag", "green flag"],
+        ["smash", "pass"],
+        ["rewatcahble", "unwatchable"],
+        ["main character", "bit character"],
+        ["worthless", "worthwhile"],
+        ["nightmare", "daydream"],
+        ["person you could beat up", "person who could beat you up"],
+        ["fight", "flight"],
+        ["better together", "better alone"],
+     ],
 }
 
 export const ALL_PROMPTS = Object.values(PROMPTS).map((prompt) => prompt.map((p) => p))
