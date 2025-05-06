@@ -209,3 +209,28 @@ export const GET_SETTINGS_COMMAND = {
   name: 'getsettings',
   description: 'Get your settings for the bot!',
 }
+
+export const LENGTHWAVE_COMMAND = {
+  name: 'lengthwave',
+  description: 'Can you read each other\'s minds?',
+  options: [
+    {
+      name: 'category',
+      description: 'What category should be the prompts be from?',
+      type: 3,
+      required: false
+    },
+    {
+      name: 'left',
+      description: 'Left Custom Prompt',
+      type: 3,
+      required: false
+    },
+    {
+      name: 'right',
+      description: 'Right Custom Prompt',
+      type: 3,
+      required: false
+    }
+  ]
+}

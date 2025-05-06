@@ -22,13 +22,15 @@ import {
   GET_SETTINGS_COMMAND,
   UPDATE_SETTINGS_COMMAND,
   DELETE_MAIL_COMMAND,
+  LENGTHWAVE_COMMAND,
 } from './commands.js';
 import { InteractionResponseFlags } from 'discord-interactions';
 import { createCoolRole, assignRole } from './functions/coolrole.js';
 import { UserData } from './resources/UserData.js';
-import { JsonResponse, sendMailNotification} from './util.js';
+import { JsonResponse, sendMailNotification } from './util.js';
 import { coinFlip } from './functions/coinflip.js';
 import { eightBall } from './functions/eightball.js';
+import { ALL_PROMPTS, createLengthWaveClueModal, createLengthWaveGuessModal, generate_gamut, generate_guess_response_message_embed, generate_guesser_message_embed, generate_message_embed, PROMPTS } from './functions/lengthwave.js';
 import { createMailboxModal, createMailboxEmbed } from './functions/mailbox.js';
 
 const router = AutoRouter();
@@ -50,7 +52,7 @@ router.post('/', async (request, env) => {
     request,
     env,
   );
-  console.log(env);
+  // console.log(env);
 
   if (!isValid || !interaction) {
     return new Response('Bad request signature.', { status: 401 });
@@ -119,6 +121,73 @@ router.post('/', async (request, env) => {
           flags: InteractionResponseFlags.EPHEMERAL
         }
       }))
+    }
+
+    if (interaction.data.custom_id.startsWith('lengthwave_clue_modal')) {
+      const game_id = interaction.data.custom_id.split('|')[1];
+      const clue = interaction.data.components?.[0]?.components?.find(
+        (component) => component.custom_id === 'clue_input'
+      )?.value;
+
+      const id = env.NOXBOT_DATA.idFromName('lengthwave');
+      const stub = env.NOXBOT_DATA.get(id);
+      const res = await stub.fetch(`https://dummy/lengthwave?gameId=${game_id}`, {
+        method: 'GET',
+      });
+      const game_data = await res.json();
+      game_data.clue = clue;
+      console.log(game_data)
+      const message = generate_guesser_message_embed(game_id, game_data, interaction.member.user);
+
+
+
+      return new JsonResponse(message);
+    }
+
+    if (interaction.data.custom_id.startsWith('lengthwave_guess_modal')) {
+      const game_id = interaction.data.custom_id.split('|')[1];
+      const guess_value = interaction.data.components?.[0]?.components?.find(
+        (component) => component.custom_id === 'guess_input'
+      )?.value;
+
+      const id = env.NOXBOT_DATA.idFromName('lengthwave');
+      const stub = env.NOXBOT_DATA.get(id);
+      const res = await stub.fetch(`https://dummy/lengthwave?gameId=${game_id}`, {
+        method: 'GET',
+      });
+      const game_data = await res.json();
+      console.log(game_data)
+      const message = generate_guess_response_message_embed(game_id, game_data, guess_value);
+
+      return new JsonResponse(message);
+    }
+  }
+
+  if (interaction.type === InteractionType.MESSAGE_COMPONENT) {
+
+    const customId = interaction.data.custom_id;
+    const user = interaction.member.user;
+
+    if (customId === 'gamut_clue_button') {
+      const game_id = interaction.message.embeds[0].footer.text;
+      console.log(game_id)
+      const response = createLengthWaveClueModal(game_id);
+      console.log(response)
+      return new JsonResponse(response);
+    }
+
+    if (customId === 'new_gamut_button') {
+      const prompts = [["cool", "not cool"]];
+      return new JsonResponse(
+        generate_message_embed(
+          prompts
+        )
+      );
+    }
+
+    if (customId.startsWith('gamut_guess_button')) {
+      const game_id = interaction.data.custom_id.split('|')[1];
+      return new JsonResponse(createLengthWaveGuessModal(game_id));
     }
   }
 
@@ -396,7 +465,7 @@ router.post('/', async (request, env) => {
         return new JsonResponse(createMailboxEmbed(user, response.mailbox))
       }
 
-      case DELETE_MAIL_COMMAND.name.toLowerCase() : {
+      case DELETE_MAIL_COMMAND.name.toLowerCase(): {
         const index = interaction.data.options?.find(
           (option) => option.name === 'index',
         )?.value;
@@ -410,7 +479,7 @@ router.post('/', async (request, env) => {
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({index : index || -1})
+          body: JSON.stringify({ index: index || -1 })
         });
 
         const response = await res.json()
@@ -424,7 +493,7 @@ router.post('/', async (request, env) => {
         })
       }
 
-      case GET_SETTINGS_COMMAND.name.toLowerCase() : {
+      case GET_SETTINGS_COMMAND.name.toLowerCase(): {
         const user = interaction.member.user;
         const id = env.NOXBOT_DATA.idFromName(user.id);
         const stub = env.NOXBOT_DATA.get(id);
@@ -459,7 +528,7 @@ router.post('/', async (request, env) => {
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({[setting] : value})
+          body: JSON.stringify({ [setting]: value })
         });
 
         const response = await res.json()
@@ -471,7 +540,34 @@ router.post('/', async (request, env) => {
             flags: InteractionResponseFlags.EPHEMERAL,
           },
         })
+      }
 
+      case LENGTHWAVE_COMMAND.name.toLowerCase(): {
+        const prompts_category = interaction.data.options?.find(
+          (option) => option.name === 'category',
+        )?.value;
+
+        const selected = (prompts_category) ? PROMPTS[prompts_category] : undefined;
+        const prompts = selected ? selected : ALL_PROMPTS[Math.floor(Math.random() * ALL_PROMPTS.length)];
+        console.log(prompts)
+        const response_body = generate_message_embed(
+          prompts
+        );
+        console.log(response_body)
+        const id = env.NOXBOT_DATA.idFromName('lengthwave');
+        const stub = env.NOXBOT_DATA.get(id);
+        const res = await stub.fetch('https://dummy/lengthwave', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ gameId: response_body.data.embeds[0].footer.text, game_data: response_body.data.game_data })
+        });
+
+
+        return new JsonResponse(
+          response_body
+        );
       }
 
       case TEST_COMMAND.name.toLowerCase(): {

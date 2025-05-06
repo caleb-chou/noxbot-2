@@ -5,7 +5,7 @@ export class UserData {
   }
 
   async fetch(request) {
-    const { pathname } = new URL(request.url);
+    const { pathname, searchParams } = new URL(request.url);
 
     if (pathname === '/increment') {
       const data = await request.json();
@@ -120,6 +120,36 @@ export class UserData {
       await this.state.storage.put('settings', settings);
 
       return new Response(JSON.stringify(settings))
+    }
+
+    if (pathname === '/lengthwave' && request.method === 'POST') {
+      const data = await request.json();
+      // console.log(data)
+      const {gameId, game_data} = data;
+
+      await this.state.storage.put(gameId, game_data);
+
+      return new Response(JSON.stringify({ [gameId]: game_data }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    if (pathname === '/lengthwave' && request.method === 'GET') {
+      const gameId = searchParams.get('gameId');
+      const game_data = await this.state.storage.get(gameId);
+
+      if (!game_data) {
+        return new Response(JSON.stringify({ error: 'Game not found' }), {
+          status: 404,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+
+      return new Response(JSON.stringify(game_data), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
 
     return new Response('Not found', { status: 404 });
