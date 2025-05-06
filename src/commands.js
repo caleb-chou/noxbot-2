@@ -231,6 +231,12 @@ export const LENGTHWAVE_COMMAND = {
       description: 'Right Custom Prompt',
       type: 3,
       required: false
+    },
+    {
+      name: 'position',
+      description: 'Value between 0 and 1',
+      type: 3,
+      required: false
     }
   ]
 }

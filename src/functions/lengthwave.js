@@ -19,14 +19,14 @@ export const PROMPTS = {
         ["person you could beat up", "person who could beat you up"],
         ["fight", "flight"],
         ["better together", "better alone"],
-     ],
+    ],
 }
 
 export const ALL_PROMPTS = Object.values(PROMPTS).map((prompt) => prompt.map((p) => p))
 
 function generate_gamut_string(position) {
     let gamut_string = '';
-    for (let i = 0; i < 19; i++) {
+    for (let i = 0; i < 20; i++) {
         if (Math.abs(0.05 * (i + 1) - position) < 0.025) {
             gamut_string += `🟦 < ${Math.trunc(position * 1000) / 1000}\n`;
             continue;
@@ -77,8 +77,7 @@ function generate_guess_gamut_string() {
     return gamut_string;
 }
 
-export function generate_gamut(prompts) {
-    const position = Math.random();
+export function generate_gamut(prompts, position = Math.random()) {
     const prompt = prompts[Math.floor(Math.random() * prompts.length)];
     return {
         prompt: prompt,
@@ -86,8 +85,8 @@ export function generate_gamut(prompts) {
     }
 }
 
-export function generate_message_embed(prompts) {
-    const { prompt, position } = generate_gamut(prompts)
+export function generate_message_embed(prompts, custom_position) {
+    const { prompt, position } = generate_gamut(prompts, custom_position)
     const gamut_string = generate_gamut_string(position);
     const game_id = crypto.randomUUID();
     const message = {
@@ -177,7 +176,7 @@ export function generate_guesser_message_embed(game_id, game_data, user) {
     return message;
 }
 
-export function generate_guess_response_message_embed(game_id, game_data, guess_value) {
+export function generate_guess_response_message_embed(game_id, game_data, guess_value, user) {
     const { prompt } = game_data;
     const { left, right } = prompt;
     const guess = parseFloat(guess_value);
@@ -188,13 +187,19 @@ export function generate_guess_response_message_embed(game_id, game_data, guess_
         data: {
             embeds: [
                 {
+                    author: {
+                        name: `${user.username}'s guess`,
+                        icon_url: user.avatar
+                            ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png`
+                            : undefined,
+                    },
                     description: `||\`\`\`md\n${left}\n${generate_gamut_result_string(game_data.position, guess)}${right}\n\n---\n# Your guess was ${guess}\n# Distance: ${distance}\n# Score: ${calculate_score(distance)}\`\`\`||`,
                     color: 0x5865F2,
                     footer: {
                         text: `${game_id}`
                     }
                 }
-            ], 
+            ],
             // flags: 64,
         },
 
