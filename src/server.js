@@ -157,7 +157,7 @@ router.post('/', async (request, env) => {
       });
       const game_data = await res.json();
       console.log(game_data)
-      const message = generate_guess_response_message_embed(game_id, game_data, guess_value);
+      const message = generate_guess_response_message_embed(game_id, game_data, guess_value, interaction.member.user);
 
       return new JsonResponse(message);
     }
@@ -547,16 +547,57 @@ router.post('/', async (request, env) => {
           (option) => option.name === 'category',
         )?.value;
 
-        const selected = (prompts_category) ? PROMPTS[prompts_category] : undefined;
-        const prompts = selected ? selected : ALL_PROMPTS[Math.floor(Math.random() * ALL_PROMPTS.length)];
-        console.log(prompts)
+        const left = interaction.data.options?.find(
+          (option) => option.name === 'left',
+        )?.value;
+
+        const right = interaction.data.options?.find(
+          (option) => option.name === 'right',
+        )?.value;
+
+        const position_raw = interaction.data.options?.find(
+          (option) => option.name === 'position',
+        )?.value;
+
+        const position = position_raw ? parseFloat(position_raw) : Math.random();
+        if (Number.isNaN(position) || position < 0 || position > 1) {
+          return new JsonResponse({
+            type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+            data: {
+              content: 'Position must be a number between 0 and 1',
+              flags: InteractionResponseFlags.EPHEMERAL,
+            },
+          });
+        }
+
+        if ((!left || !right) && (left || right)) {
+          return new JsonResponse({
+            type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+            data: {
+              content: 'Please provide a left and right prompt',
+              flags: InteractionResponseFlags.EPHEMERAL,
+            },
+          });
+        }
+
+        let prompts;
+
+        if (left && right) {
+          prompts = [[left, right]];
+        } else {
+          const selected = (prompts_category) ? PROMPTS[prompts_category] : undefined;
+          prompts = selected ? selected : ALL_PROMPTS[Math.floor(Math.random() * ALL_PROMPTS.length)];
+        }
+
+        console.log(position)
         const response_body = generate_message_embed(
-          prompts
+          prompts,
+          position
         );
-        console.log(response_body)
+
         const id = env.NOXBOT_DATA.idFromName('lengthwave');
         const stub = env.NOXBOT_DATA.get(id);
-        const res = await stub.fetch('https://dummy/lengthwave', {
+        await stub.fetch('https://dummy/lengthwave', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
