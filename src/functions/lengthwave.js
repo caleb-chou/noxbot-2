@@ -188,7 +188,7 @@ export function generate_guess_response_message_embed(game_id, game_data, guess_
         data: {
             embeds: [
                 {
-                    description: `||${left}\n${generate_gamut_result_string(game_data.position, guess)}${right}\n\n**Your guess was ${guess}**\n**Distance: ${distance}**\n**Score: ${calculate_score(distance)}**||`,
+                    description: `||\`\`\`md\n${left}\n${generate_gamut_result_string(game_data.position, guess)}${right}\n\n---\n# Your guess was ${guess}\n# Distance: ${distance}\n# Score: ${calculate_score(distance)}\`\`\`||`,
                     color: 0x5865F2,
                     footer: {
                         text: `${game_id}`
