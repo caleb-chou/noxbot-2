@@ -240,3 +240,22 @@ export const LENGTHWAVE_COMMAND = {
     }
   ]
 }
+
+export const EMOTE_COMMAND = {
+  name: 'emote',
+  description: 'borrow an emote from 7tv',
+  options: [
+    {
+      name: 'emote',
+      description: 'The emote to borrow',
+      type: 3,
+      required: true
+    },
+    {
+      name: 'url',
+      description: 'The url to the emote',
+      type: 3,
+      required: true,
+    },
+  ]
+}
