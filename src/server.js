@@ -23,6 +23,7 @@ import {
   UPDATE_SETTINGS_COMMAND,
   DELETE_MAIL_COMMAND,
   LENGTHWAVE_COMMAND,
+  EMOTE_COMMAND,
 } from './commands.js';
 import { InteractionResponseFlags } from 'discord-interactions';
 import { createCoolRole, assignRole } from './functions/coolrole.js';
@@ -32,6 +33,7 @@ import { coinFlip } from './functions/coinflip.js';
 import { eightBall } from './functions/eightball.js';
 import { ALL_PROMPTS, createLengthWaveClueModal, createLengthWaveGuessModal, generate_gamut, generate_guess_response_message_embed, generate_guesser_message_embed, generate_message_embed, PROMPTS } from './functions/lengthwave.js';
 import { createMailboxModal, createMailboxEmbed } from './functions/mailbox.js';
+import { add_emoji, image_to_buffer } from './functions/emoji.js';
 
 const router = AutoRouter();
 
@@ -609,6 +611,43 @@ router.post('/', async (request, env) => {
         return new JsonResponse(
           response_body
         );
+      }
+
+      case EMOTE_COMMAND.name.toLowerCase(): {
+        const emoteUrl = interaction.data.options?.find(
+          (option) => option.name === 'url',
+        )?.value;
+
+        const emoteName = interaction.data.options?.find(
+          (option) => option.name === 'emote',
+        )?.value;
+
+        console.log(emoteUrl)
+        console.log(emoteName)
+
+        const guild = interaction.guild;
+        console.log(interaction.guild)
+        const emoteData = await image_to_buffer(emoteUrl);
+        console.log('got emote data')
+        const response = await add_emoji(env.DISCORD_TOKEN, guild.id, emoteName, emoteData);
+
+        if (!response.ok) {
+          return new JsonResponse({
+            type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+            data: {
+              content: `Failed to add ${emoteName} to the server!`,
+              flags: InteractionResponseFlags.EPHEMERAL,
+            },
+          })
+        }
+
+        return new JsonResponse({
+          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+          data: {
+            content: `Added ${emoteName} to the server!`,
+            flags: InteractionResponseFlags.EPHEMERAL,
+          },
+        })
       }
 
       case TEST_COMMAND.name.toLowerCase(): {
