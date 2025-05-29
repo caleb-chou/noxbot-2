@@ -4,8 +4,15 @@ const WORD_REGEX = /\b(\w{3,}|<:\w+:\w+>)\b/g;
 
 export async function getStatsOnUser(interaction, userId, userChatData, token) {
     const messages = await getUserMessages(interaction.channel_id, userId, userChatData?.lastMessageId, token);
-    const filtered_messages = messages.filter(msg => WORD_REGEX.test(msg.content));
-
+    messages.map(msg => msg.content).forEach(content => {
+        const match = content.match(WORD_REGEX);
+        if (match) {
+            match.forEach(matchedWord => {
+                userChatData.words[matchedWord] = (userChatData.words[matchedWord] || 0) + 1;
+            });
+        }
+    })
+    console.log(`Stats for user ${userId}:\n`, userChatData.words);
 }
 
 async function getUserMessages(channelId, userId, userLastMessageId, token) {
@@ -18,7 +25,7 @@ async function getUserMessages(channelId, userId, userLastMessageId, token) {
         if (lastMessageId) {
             url.searchParams.set('before', lastMessageId);
         }
-        
+
         if (userLastMessageId) {
             url.searchParams.set('after', userLastMessageId);
         }
