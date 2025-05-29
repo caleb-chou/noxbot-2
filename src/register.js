@@ -14,7 +14,8 @@ import {
   UPDATE_SETTINGS_COMMAND,
   GET_SETTINGS_COMMAND,
   LENGTHWAVE_COMMAND,
-  EMOTE_COMMAND
+  EMOTE_COMMAND,
+  CHAT_TRACK_COMMAND
 } from './commands.js';
 import dotenv from 'dotenv';
 import process from 'node:process';
@@ -67,7 +68,8 @@ const response = await fetch(url, {
     UPDATE_SETTINGS_COMMAND,
     GET_SETTINGS_COMMAND,
     LENGTHWAVE_COMMAND,
-    EMOTE_COMMAND
+    EMOTE_COMMAND,
+    CHAT_TRACK_COMMAND
   ]),
 });
 

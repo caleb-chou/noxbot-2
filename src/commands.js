@@ -259,3 +259,16 @@ export const EMOTE_COMMAND = {
     },
   ]
 }
+
+export const CHAT_TRACK_COMMAND = {
+  name: 'chattrack',
+  description: 'Track a user\'s chat activity',
+  options: [
+    {
+      name: 'user',
+      description: 'The user to track',
+      type: 6,
+      required: false
+    }
+  ]
+}

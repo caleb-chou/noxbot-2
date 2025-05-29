@@ -152,6 +152,10 @@ export class UserData {
       });
     }
 
+    if (pathname === '/chattrack' && request.method === 'POST') {
+      const userId = searchParams.get('userId');
+    }
+
     return new Response('Not found', { status: 404 });
   }
 }
