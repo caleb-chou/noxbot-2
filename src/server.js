@@ -614,6 +614,10 @@ router.post('/', async (request, env) => {
       }
 
       case EMOTE_COMMAND.name.toLowerCase(): {
+        const emoteSource = interaction.data.options?.find(
+          (option) => option.name === 'source',
+        )?.value;
+
         const emoteUrl = interaction.data.options?.find(
           (option) => option.name === 'url',
         )?.value;
@@ -622,12 +626,13 @@ router.post('/', async (request, env) => {
           (option) => option.name === 'emote',
         )?.value;
 
+        console.log(emoteSource)
         console.log(emoteUrl)
         console.log(emoteName)
 
         const guild = interaction.guild;
         console.log(interaction.guild)
-        const emoteData = await image_to_buffer(emoteUrl);
+        const emoteData = await image_to_buffer(emoteSource, emoteUrl);
         console.log('got emote data')
         const response = await add_emoji(env.DISCORD_TOKEN, guild.id, emoteName, emoteData);
 
