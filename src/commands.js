@@ -243,8 +243,24 @@ export const LENGTHWAVE_COMMAND = {
 
 export const EMOTE_COMMAND = {
   name: 'emote',
-  description: 'borrow an emote from 7tv',
+  description: 'borrow an emote',
   options: [
+    {
+      name: 'source',
+      description: 'The source of the emote',
+      type: 3,
+      required: true,
+      choices: [
+        {
+          name: '7tv',
+          value: '7tv',
+        },
+        {
+          name: 'other',
+          value: 'other',
+        },
+      ],
+    },
     {
       name: 'emote',
       description: 'The emote to borrow',

@@ -1,10 +1,15 @@
-export async function image_to_buffer(url) {
+export async function image_to_buffer(source, url) {
     console.log(`Converting image to buffer from ${url}`);
     const { pathname } = new URL(url);
-    const realpath = pathname.substring(pathname.lastIndexOf('/') + 1);
-    console.log(`Fetching image from ${realpath}`);
-    const get_the_url = `https://cdn.7tv.app/emote/${realpath}/4x.avif`;
-    const response = await fetch(get_the_url);
+    if(source == '7tv'){
+        const realpath = pathname.substring(pathname.lastIndexOf('/') + 1);
+        console.log(`Fetching image from ${realpath}`);
+        const get_the_url = `https://cdn.7tv.app/emote/${realpath}/4x.avif`;
+        const response = await fetch(get_the_url);
+    }
+    else if(source == 'other'){
+        const response = await fetch(url);
+    }
     console.log(`Response status: ${response.status}`);
     const buffer = await response.arrayBuffer();
     console.log(`Buffer length: ${buffer.byteLength}`);
