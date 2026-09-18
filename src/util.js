@@ -10,6 +10,11 @@ export class JsonResponse extends Response {
   }
 }
 
+/** Interactions from a DM have no `member`; guild interactions have no top-level `user`. */
+export function interactionUser(interaction) {
+  return interaction.member?.user ?? interaction.user;
+}
+
 export async function sendMailNotification(recipientId, env) {
   const botToken = env.DISCORD_TOKEN; // you should store your bot token safely in environment variables
   

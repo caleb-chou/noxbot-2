@@ -22,7 +22,7 @@ export const PROMPTS = {
     ],
 }
 
-export const ALL_PROMPTS = Object.values(PROMPTS).map((prompt) => prompt.map((p) => p))
+export const ALL_PROMPTS = Object.values(PROMPTS);
 
 function generate_gamut_string(position) {
     let gamut_string = '';
@@ -56,7 +56,7 @@ function generate_gamut_result_string(position, guess) {
             gamut_string += `🟨`
         else
             gamut_string += `⬛`
-        if (Math.abs(0.05 * (i + 1) - position) < 0.025) {
+        if (Math.abs(0.05 * (i + 1) - guess) < 0.025) {
             gamut_string += ` < Your guess ${guess}`;
         }
         if (i % 5 === 4)
@@ -176,11 +176,9 @@ export function generate_guesser_message_embed(game_id, game_data, user) {
     return message;
 }
 
-export function generate_guess_response_message_embed(game_id, game_data, guess_value, user) {
-    const { prompt } = game_data;
-    const { left, right } = prompt;
-    const guess = parseFloat(guess_value);
-    const distance = Math.abs(game_data.position - (Number.isNaN(guess) ? 0 : guess));
+export function generate_guess_response_message_embed(game_id, game_data, guess, user) {
+    const { left, right } = game_data.prompt;
+    const distance = Math.abs(game_data.position - guess);
 
     const message = {
         type: 4, // CHANNEL_MESSAGE_WITH_SOURCE

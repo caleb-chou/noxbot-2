@@ -1,46 +1,66 @@
 const DISCORD_API = 'https://discord.com/api/v10';
-const WORD_REGEX = /\b(\w{3,}|<:\w+:\w+>)\b/g;
+// Emotes first: `\b` never matches before `<`, so `<:name:id>` loses to the
+// alternation if it comes second.
+const WORD_REGEX = /<a?:\w+:\d+>|\b\w{3,}\b/g;
 
-
+/**
+ * Fold a user's new messages in this channel into their word counts.
+ * Returns updated chat data; `lastMessageId` is the watermark for the next run.
+ */
 export async function getStatsOnUser(interaction, userId, userChatData, token) {
-    const messages = await getUserMessages(interaction.channel_id, userId, userChatData?.lastMessageId, token);
-    messages.map(msg => msg.content).forEach(content => {
-        const match = content.match(WORD_REGEX);
-        if (match) {
-            match.forEach(matchedWord => {
-                userChatData.words[matchedWord] = (userChatData.words[matchedWord] || 0) + 1;
-            });
-        }
-    })
-    console.log(`Stats for user ${userId}:\n`, userChatData.words);
+  const words = { ...(userChatData?.words ?? {}) };
+  const messages = await getUserMessages(
+    interaction.channel_id,
+    userId,
+    userChatData?.lastMessageId,
+    token,
+  );
+
+  for (const { content } of messages) {
+    for (const word of content.match(WORD_REGEX) ?? []) {
+      words[word] = (words[word] || 0) + 1;
+    }
+  }
+
+  return {
+    words,
+    // messages is newest-first, so [0] is the new watermark.
+    lastMessageId: messages[0]?.id ?? userChatData?.lastMessageId,
+  };
 }
 
-async function getUserMessages(channelId, userId, userLastMessageId, token) {
-    const messages = [];
-    let lastMessageId = null;
+async function getUserMessages(channelId, userId, sinceMessageId, token) {
+  const messages = [];
+  let before = null;
 
-    do {
-        const url = new URL(`${DISCORD_API}/channels/${channelId}/messages`);
-        url.searchParams.set('limit', 100);
-        if (lastMessageId) {
-            url.searchParams.set('before', lastMessageId);
-        }
+  // Page backwards from newest until we reach the last message we already counted.
+  for (;;) {
+    const url = new URL(`${DISCORD_API}/channels/${channelId}/messages`);
+    url.searchParams.set('limit', '100');
+    if (before) {
+      url.searchParams.set('before', before);
+    }
 
-        if (userLastMessageId) {
-            url.searchParams.set('after', userLastMessageId);
-        }
+    const res = await fetch(url, { headers: { Authorization: `Bot ${token}` } });
+    if (!res.ok) {
+      throw new Error(`Failed to fetch messages: ${res.status} ${res.statusText}`);
+    }
 
-        const res = await fetch(url, {
-            headers: { Authorization: `Bot ${token}` },
-        });
+    const batch = await res.json();
+    if (batch.length === 0) {
+      return messages;
+    }
 
-        if (!res.ok) throw new Error(`Failed to fetch: ${res.statusText}`);
-        const batch = await res.json();
-        const filtered = batch.filter(msg => msg.author.id === userId);
-        messages.push(...filtered);
-        lastMessageId = batch[batch.length - 1].id;
+    for (const msg of batch) {
+      // Snowflakes sort chronologically.
+      if (sinceMessageId && BigInt(msg.id) <= BigInt(sinceMessageId)) {
+        return messages;
+      }
+      if (msg.author.id === userId) {
+        messages.push(msg);
+      }
+    }
 
-    } while (batch.length > 0);
-
-    return messages;
+    before = batch[batch.length - 1].id;
+  }
 }
