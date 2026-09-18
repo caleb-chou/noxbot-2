@@ -1,3 +1,6 @@
+// Not stats: /get feeds the stats embed and must not leak these.
+const INTERNAL_KEYS = new Set(['mailbox', 'settings']);
+
 export class UserData {
   constructor(ctx, env) {
     this.state = ctx;
@@ -12,22 +15,26 @@ export class UserData {
       if (!data.key) {
         return new Response('Invalid data', { status: 400 });
       }
-      let count = (await this.state.storage.get(data.key)) || 0;
-      count++;
+      const count = ((await this.state.storage.get(data.key)) || 0) + 1;
       await this.state.storage.put(data.key, count);
-      return new Response(JSON.stringify({ count }));
+      return new Response(JSON.stringify({ [data.key]: count }), {
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
 
     if (pathname === '/get') {
       const allData = await this.state.storage.list();
-      return new Response(JSON.stringify(Object.fromEntries(allData)), {
+      const stats = Object.fromEntries(
+        [...allData].filter(([key]) => !INTERNAL_KEYS.has(key)),
+      );
+      return new Response(JSON.stringify(stats), {
         headers: { 'Content-Type': 'application/json' },
       });
     }
 
     if (pathname === '/set') {
       const data = await request.json();
-      const [key, value] = Object.entries(data)[0];
+      const [key, value] = Object.entries(data)[0] ?? [];
       if (!key || value === undefined) {
         return new Response('Invalid data', { status: 400 });
       }
@@ -55,7 +62,6 @@ export class UserData {
         );
       }
       mailbox.push(mail);
-      console.log(mailbox)
       await this.state.storage.put('mailbox', mailbox);
       return new Response(JSON.stringify({ success: true, message: 'Mail Sent.' }), {
         status: 200,
@@ -66,18 +72,22 @@ export class UserData {
     if (pathname === '/getMailbox' && request.method === 'GET') {
       const mailbox = (await this.state.storage.get('mailbox')) || [];
 
-      return new Response(JSON.stringify({
-        status: 200,
+      return new Response(JSON.stringify({ mailbox }), {
         headers: { 'Content-Type': 'application/json' },
-        mailbox: mailbox
-      }));
+      });
     }
 
     if (pathname === '/deleteMail' && request.method === 'POST') {
       const data = await request.json();
-      const index = data.index - 1;
+      const index = Number(data.index) - 1;
+      const mailbox = (await this.state.storage.get('mailbox')) || [];
 
-      let mailbox = (await this.state.storage.get('mailbox')) || [];
+      if (Number.isNaN(index)) {
+        return new Response(JSON.stringify({ error: 'Invalid index.' }), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
 
       if (index < 0) {
         // No index provided → clear mailbox
@@ -88,7 +98,7 @@ export class UserData {
         });
       }
 
-      if (typeof index !== 'number' || index < 0 || index >= mailbox.length) {
+      if (index >= mailbox.length) {
         return new Response(JSON.stringify({ error: 'Invalid or out of bounds index.' }), {
           status: 400,
           headers: { 'Content-Type': 'application/json' },
@@ -106,20 +116,27 @@ export class UserData {
     }
 
     if (pathname === '/getSettings') {
-      const settings = await (this.state.storage.get('settings')) || {};
-      return new Response(JSON.stringify(settings))
+      const settings = (await this.state.storage.get('settings')) || {};
+      return new Response(JSON.stringify(settings), {
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
 
     if (pathname === '/updateSettings') {
-      const settings = await (this.state.storage.get('settings')) || {};
-      const data = await request.json()
-      const [key, value] = Object.entries(data)[0];
+      const settings = (await this.state.storage.get('settings')) || {};
+      const data = await request.json();
+      const [key, value] = Object.entries(data)[0] ?? [];
+      if (!key) {
+        return new Response('Invalid data', { status: 400 });
+      }
 
       settings[key] = value;
 
       await this.state.storage.put('settings', settings);
 
-      return new Response(JSON.stringify(settings))
+      return new Response(JSON.stringify(settings), {
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
 
     if (pathname === '/lengthwave' && request.method === 'POST') {

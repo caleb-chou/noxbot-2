@@ -1,6 +1,6 @@
 import { InteractionResponseFlags } from 'discord-interactions';
 import { InteractionResponseType } from 'discord-interactions';
-import { JsonResponse } from '../util.js';
+import { JsonResponse, interactionUser } from '../util.js';
 
 const eightBallResponses = [
   ['It is certain.', 0],
@@ -25,6 +25,7 @@ const eightBallResponses = [
   ['Very doubtful.', 2],
 ];
 export async function eightBall(question, interaction, ephemeral) {
+  const user = interactionUser(interaction);
   const result =
     eightBallResponses[Math.floor(Math.random() * eightBallResponses.length)];
   let color;
@@ -42,19 +43,19 @@ export async function eightBall(question, interaction, ephemeral) {
       color = 0x000000;
       break;
   }
-  let body = {
+  const body = {
     type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
     data: {
       embeds: [
         {
           author: {
-            name: `${interaction.member.user.username} asked: "${question}"`,
-            icon_url: interaction.member.user.avatar
-              ? `https://cdn.discordapp.com/avatars/${interaction.member.user.id}/${interaction.member.user.avatar}.png`
+            name: `${user.username} asked: "${question}"`,
+            icon_url: user.avatar
+              ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png`
               : undefined,
           },
           description: `🎱 8Ball says...\n→ **${result[0]}**`,
-          color: color, // gold-ish
+          color: color,
         },
       ],
     },

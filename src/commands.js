@@ -218,7 +218,11 @@ export const LENGTHWAVE_COMMAND = {
       name: 'category',
       description: 'What category should be the prompts be from?',
       type: 3,
-      required: false
+      required: false,
+      choices: [
+        { name: 'base', value: 'base' },
+        { name: 'advanced', value: 'advanced' },
+      ],
     },
     {
       name: 'left',
@@ -257,5 +261,18 @@ export const EMOTE_COMMAND = {
       type: 3,
       required: true,
     },
+  ]
+}
+
+export const CHAT_TRACK_COMMAND = {
+  name: 'chattrack',
+  description: 'Track a user\'s chat activity',
+  options: [
+    {
+      name: 'user',
+      description: 'The user to track',
+      type: 6,
+      required: false
+    }
   ]
 }

@@ -14,13 +14,16 @@ export async function createCoolRole(guildId, token) {
             mentionable: false,
         }),
     });
-    console.log(response);
+    if (!response.ok) {
+        console.error('createCoolRole failed:', response.status, await response.text());
+        return null;
+    }
     const data = await response.json();
     return data.id; // returns role ID
 }
 
 export async function assignRole(guildId, userId, roleId, token) {
-    var response = await fetch(
+    return fetch(
         `${DISCORD_API}/guilds/${guildId}/members/${userId}/roles/${roleId}`,
         {
             method: 'PUT',
@@ -29,5 +32,4 @@ export async function assignRole(guildId, userId, roleId, token) {
             },
         },
     );
-    return response;
 }

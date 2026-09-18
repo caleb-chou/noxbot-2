@@ -4,6 +4,7 @@
 
 import { AutoRouter } from 'itty-router';
 import {
+  InteractionResponseFlags,
   InteractionResponseType,
   InteractionType,
   verifyKey,
@@ -25,17 +26,52 @@ import {
   LENGTHWAVE_COMMAND,
   EMOTE_COMMAND,
 } from './commands.js';
-import { InteractionResponseFlags } from 'discord-interactions';
 import { createCoolRole, assignRole } from './functions/coolrole.js';
 import { UserData } from './resources/UserData.js';
-import { JsonResponse, sendMailNotification } from './util.js';
+import { JsonResponse, sendMailNotification, interactionUser } from './util.js';
 import { coinFlip } from './functions/coinflip.js';
 import { eightBall } from './functions/eightball.js';
-import { ALL_PROMPTS, createLengthWaveClueModal, createLengthWaveGuessModal, generate_gamut, generate_guess_response_message_embed, generate_guesser_message_embed, generate_message_embed, PROMPTS } from './functions/lengthwave.js';
+import {
+  ALL_PROMPTS,
+  createLengthWaveClueModal,
+  createLengthWaveGuessModal,
+  generate_guess_response_message_embed,
+  generate_guesser_message_embed,
+  generate_message_embed,
+  PROMPTS,
+} from './functions/lengthwave.js';
 import { createMailboxModal, createMailboxEmbed } from './functions/mailbox.js';
 import { add_emoji, image_to_buffer } from './functions/emoji.js';
 
 const router = AutoRouter();
+
+const SNOWFLAKE = /^\d{17,20}$/;
+const ADMINISTRATOR = 8n;
+
+const ephemeralText = (content) =>
+  new JsonResponse({
+    type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+    data: { content, flags: InteractionResponseFlags.EPHEMERAL },
+  });
+
+const userData = (env, name) =>
+  env.NOXBOT_DATA.get(env.NOXBOT_DATA.idFromName(name));
+
+const isAdmin = (interaction) =>
+  (BigInt(interaction.member?.permissions ?? 0) & ADMINISTRATOR) !== 0n;
+
+/** Persist a gamut so the clue/guess modals can look its answer up later. */
+async function saveGamut(env, body) {
+  await userData(env, 'lengthwave').fetch('https://dummy/lengthwave', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      gameId: body.data.embeds[0].footer.text,
+      game_data: body.data.game_data,
+    }),
+  });
+  return body;
+}
 
 /**
  * A simple :wave: hello page to verify the worker is working.
@@ -82,17 +118,22 @@ router.post('/', async (request, env) => {
         (component) => component.custom_id === 'message_input'
       )?.value;
 
+      // Mailboxes are keyed by user id; a username would silently post into a
+      // mailbox nobody ever reads.
+      if (!SNOWFLAKE.test(recipient ?? '')) {
+        return ephemeralText(
+          `"${recipient}" is not a user ID. Pick the recipient with the \`user\` option on /sendmail, or paste their ID.`,
+        );
+      }
+
       const mail = {
-        sender: interaction.member.user.username,
+        sender: interactionUser(interaction).username,
         subject: subject,
         message: message,
         timestamp: new Date().toISOString(),
-      }
+      };
 
-      console.log(JSON.stringify(interaction.data))
-
-      const id = env.NOXBOT_DATA.idFromName(recipient);
-      const stub = env.NOXBOT_DATA.get(id);
+      const stub = userData(env, recipient);
 
       const res = await stub.fetch('https://dummy/addToMailbox', {
         method: 'POST',
@@ -103,26 +144,18 @@ router.post('/', async (request, env) => {
       });
       const response = await res.json();
 
-      const shouldNotify = await stub.fetch('https://dummy/getSettings', {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        }
-      });
-      const userSettings = await shouldNotify.json();
-
-      console.log(userSettings)
-      if (userSettings.notifyForMail === 'true') {
-        await sendMailNotification(recipient, env)
+      if (!res.ok) {
+        return ephemeralText(response.error ?? 'Could not deliver that mail.');
       }
 
-      return (new JsonResponse({
-        type: 4,
-        data: {
-          content: response.message,
-          flags: InteractionResponseFlags.EPHEMERAL
-        }
-      }))
+      const settingsRes = await stub.fetch('https://dummy/getSettings');
+      const userSettings = await settingsRes.json();
+
+      if (userSettings.notifyForMail === 'true') {
+        await sendMailNotification(recipient, env);
+      }
+
+      return ephemeralText(response.message);
     }
 
     if (interaction.data.custom_id.startsWith('lengthwave_clue_modal')) {
@@ -131,19 +164,18 @@ router.post('/', async (request, env) => {
         (component) => component.custom_id === 'clue_input'
       )?.value;
 
-      const id = env.NOXBOT_DATA.idFromName('lengthwave');
-      const stub = env.NOXBOT_DATA.get(id);
-      const res = await stub.fetch(`https://dummy/lengthwave?gameId=${game_id}`, {
-        method: 'GET',
-      });
+      const res = await userData(env, 'lengthwave').fetch(
+        `https://dummy/lengthwave?gameId=${game_id}`,
+      );
+      if (!res.ok) {
+        return ephemeralText('That gamut is gone — start a new one with /lengthwave.');
+      }
       const game_data = await res.json();
       game_data.clue = clue;
-      console.log(game_data)
-      const message = generate_guesser_message_embed(game_id, game_data, interaction.member.user);
 
-
-
-      return new JsonResponse(message);
+      return new JsonResponse(
+        generate_guesser_message_embed(game_id, game_data, interactionUser(interaction)),
+      );
     }
 
     if (interaction.data.custom_id.startsWith('lengthwave_guess_modal')) {
@@ -152,38 +184,43 @@ router.post('/', async (request, env) => {
         (component) => component.custom_id === 'guess_input'
       )?.value;
 
-      const id = env.NOXBOT_DATA.idFromName('lengthwave');
-      const stub = env.NOXBOT_DATA.get(id);
-      const res = await stub.fetch(`https://dummy/lengthwave?gameId=${game_id}`, {
-        method: 'GET',
-      });
-      const game_data = await res.json();
-      console.log(game_data)
-      const message = generate_guess_response_message_embed(game_id, game_data, guess_value, interaction.member.user);
+      const guess = parseFloat(guess_value);
+      if (Number.isNaN(guess) || guess < 0 || guess > 1) {
+        return ephemeralText('Your guess must be a number between 0 and 1.');
+      }
 
-      return new JsonResponse(message);
+      const res = await userData(env, 'lengthwave').fetch(
+        `https://dummy/lengthwave?gameId=${game_id}`,
+      );
+      if (!res.ok) {
+        return ephemeralText('That gamut is gone — start a new one with /lengthwave.');
+      }
+      const game_data = await res.json();
+
+      return new JsonResponse(
+        generate_guess_response_message_embed(
+          game_id,
+          game_data,
+          guess,
+          interactionUser(interaction),
+        ),
+      );
     }
   }
 
   if (interaction.type === InteractionType.MESSAGE_COMPONENT) {
 
     const customId = interaction.data.custom_id;
-    const user = interaction.member.user;
 
     if (customId === 'gamut_clue_button') {
       const game_id = interaction.message.embeds[0].footer.text;
-      console.log(game_id)
-      const response = createLengthWaveClueModal(game_id);
-      console.log(response)
-      return new JsonResponse(response);
+      return new JsonResponse(createLengthWaveClueModal(game_id));
     }
 
     if (customId === 'new_gamut_button') {
-      const prompts = [["cool", "not cool"]];
+      const prompts = ALL_PROMPTS[Math.floor(Math.random() * ALL_PROMPTS.length)];
       return new JsonResponse(
-        generate_message_embed(
-          prompts
-        )
+        await saveGamut(env, generate_message_embed(prompts)),
       );
     }
 
@@ -194,7 +231,6 @@ router.post('/', async (request, env) => {
   }
 
   if (interaction.type === InteractionType.APPLICATION_COMMAND) {
-    console.debug(interaction.data);
     // Most user commands will come as `APPLICATION_COMMAND`.
     switch (interaction.data.name.toLowerCase()) {
       case INVITE_COMMAND.name.toLowerCase(): {
@@ -210,16 +246,8 @@ router.post('/', async (request, env) => {
       }
 
       case INCREMENT_STATS_COMMAND.name.toLowerCase(): {
-        const hasAdmin =
-          (BigInt(interaction.member.permissions) & BigInt(0x00000008)) !== 0n; // ADMINISTRATOR bit
-        if (!hasAdmin) {
-          return new JsonResponse({
-            type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-            data: {
-              content: "You don't have permission to use this command.",
-              flags: InteractionResponseFlags.EPHEMERAL,
-            },
-          });
+        if (!isAdmin(interaction)) {
+          return ephemeralText("You don't have permission to use this command.");
         }
         const user = interaction.data.options?.find(
           (option) => option.name === 'user',
@@ -231,12 +259,13 @@ router.post('/', async (request, env) => {
           (option) => option.name === 'ephemeral',
         )?.value;
 
-        const resolvedUser = interaction.data.resolved?.users?.[user];
-        const username = resolvedUser?.username;
+        if (!stat) {
+          return ephemeralText('Tell me which stat to increment.');
+        }
 
-        const id = env.NOXBOT_DATA.idFromName(user);
-        const stub = env.NOXBOT_DATA.get(id);
-        const res = await stub.fetch('https://dummy/increment', {
+        const username = interaction.data.resolved?.users?.[user]?.username;
+
+        const res = await userData(env, user).fetch('https://dummy/increment', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -245,13 +274,10 @@ router.post('/', async (request, env) => {
         });
         const data = await res.json();
 
-        console.log(data);
-
-        let body = {
+        const body = {
           type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
           data: {
             content: `Incremented stat ${stat} to ${data[stat]} for user ${username}.`,
-            flags: InteractionResponseFlags.EPHEMERAL,
           },
         };
         if (ephemeral) {
@@ -273,9 +299,7 @@ router.post('/', async (request, env) => {
           (option) => option.name === 'ephemeral',
         )?.value;
 
-        const id = env.NOXBOT_DATA.idFromName(userId);
-        const stub = env.NOXBOT_DATA.get(id);
-        const res = await stub.fetch('https://dummy/get');
+        const res = await userData(env, userId).fetch('https://dummy/get');
         const data = await res.json();
 
         const resolvedUser = interaction.data.resolved?.users?.[userId];
@@ -305,7 +329,8 @@ router.post('/', async (request, env) => {
             inline: true,
           });
         } else {
-          for (const [key, value] of Object.entries(data)) {
+          // Discord rejects embeds with more than 25 fields.
+          for (const [key, value] of Object.entries(data).slice(0, 25)) {
             embed.fields.push({
               name: key,
               value: `${value}`,
@@ -333,17 +358,8 @@ router.post('/', async (request, env) => {
       }
 
       case UPDATE_STATS_COMMAND.name.toLowerCase(): {
-        const hasAdmin =
-          (BigInt(interaction.member.permissions) & BigInt(0x00000008)) !== 0n; // ADMINISTRATOR bit
-
-        if (!hasAdmin) {
-          return new JsonResponse({
-            type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-            data: {
-              content: "You don't have permission to use this command.",
-              flags: InteractionResponseFlags.EPHEMERAL,
-            },
-          });
+        if (!isAdmin(interaction)) {
+          return ephemeralText("You don't have permission to use this command.");
         }
 
         const user = interaction.data.options?.find(
@@ -359,13 +375,9 @@ router.post('/', async (request, env) => {
           (option) => option.name === 'ephemeral',
         )?.value;
 
-        const resolvedUser = interaction.data.resolved?.users?.[user];
+        const username = interaction.data.resolved?.users?.[user]?.username;
 
-        const username = resolvedUser?.username;
-
-        const id = env.NOXBOT_DATA.idFromName(user);
-        const stub = env.NOXBOT_DATA.get(id);
-        const res = await stub.fetch('https://dummy/set', {
+        const res = await userData(env, user).fetch('https://dummy/set', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -389,16 +401,8 @@ router.post('/', async (request, env) => {
       }
 
       case DROP_STATS_COMMAND.name.toLowerCase(): {
-        const hasAdmin =
-          (BigInt(interaction.member.permissions) & BigInt(0x00000008)) !== 0n; // ADMINISTRATOR bit
-        if (!hasAdmin) {
-          return new JsonResponse({
-            type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-            data: {
-              content: "You don't have permission to use this command.",
-              flags: InteractionResponseFlags.EPHEMERAL,
-            },
-          });
+        if (!isAdmin(interaction)) {
+          return ephemeralText("You don't have permission to use this command.");
         }
         const user = interaction.data.options?.find(
           (option) => option.name === 'user',
@@ -406,17 +410,10 @@ router.post('/', async (request, env) => {
         const ephemeral = interaction.data.options?.find(
           (option) => option.name === 'ephemeral',
         )?.value;
-        const id = env.NOXBOT_DATA.idFromName(user);
-        const stub = env.NOXBOT_DATA.get(id);
-        const res = await stub.fetch('https://dummy/deleteAll', {
+        await userData(env, user).fetch('https://dummy/deleteAll', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
         });
-        const data = await res.json();
-        console.log(data);
-        let body = {
+        const body = {
           type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
           data: {
             content: `All stats for user ${user} have been deleted.`,
@@ -456,15 +453,11 @@ router.post('/', async (request, env) => {
       }
 
       case CHECK_MAILBOX_COMMAND.name.toLowerCase(): {
-        const user = interaction.member?.user || interaction.user;
-        const id = env.NOXBOT_DATA.idFromName(user.id);
-        const stub = env.NOXBOT_DATA.get(id);
+        const user = interactionUser(interaction);
+        const res = await userData(env, user.id).fetch('https://dummy/getMailbox');
+        const { mailbox } = await res.json();
 
-        const res = await stub.fetch('https://dummy/getMailbox');
-
-        const response = await res.json()
-
-        return new JsonResponse(createMailboxEmbed(user, response.mailbox))
+        return new JsonResponse(createMailboxEmbed(user, mailbox));
       }
 
       case DELETE_MAIL_COMMAND.name.toLowerCase(): {
@@ -472,45 +465,26 @@ router.post('/', async (request, env) => {
           (option) => option.name === 'index',
         )?.value;
 
-        const user = interaction.member.user;
-        const id = env.NOXBOT_DATA.idFromName(user.id);
-        const stub = env.NOXBOT_DATA.get(id);
-
-        const res = await stub.fetch('https://dummy/deleteMail', {
+        const user = interactionUser(interaction);
+        const res = await userData(env, user.id).fetch('https://dummy/deleteMail', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ index: index || -1 })
+          body: JSON.stringify({ index: index ?? -1 }),
         });
 
-        const response = await res.json()
+        const response = await res.json();
 
-        return new JsonResponse({
-          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-          data: {
-            content: `${response.message}`,
-            flags: InteractionResponseFlags.EPHEMERAL,
-          },
-        })
+        return ephemeralText(response.message ?? response.error);
       }
 
       case GET_SETTINGS_COMMAND.name.toLowerCase(): {
-        const user = interaction.member.user;
-        const id = env.NOXBOT_DATA.idFromName(user.id);
-        const stub = env.NOXBOT_DATA.get(id);
+        const user = interactionUser(interaction);
+        const res = await userData(env, user.id).fetch('https://dummy/getSettings');
+        const settings = await res.json();
 
-        const res = await stub.fetch('https://dummy/getSettings')
-
-        const response = await res.json()
-
-        return new JsonResponse({
-          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-          data: {
-            content: `${JSON.stringify(response)}`,
-            flags: InteractionResponseFlags.EPHEMERAL,
-          },
-        })
+        return ephemeralText(JSON.stringify(settings));
       }
 
       case UPDATE_SETTINGS_COMMAND.name.toLowerCase(): {
@@ -521,27 +495,16 @@ router.post('/', async (request, env) => {
           (option) => option.name === 'value',
         )?.value;
 
-        const user = interaction.member.user;
-        const id = env.NOXBOT_DATA.idFromName(user.id);
-        const stub = env.NOXBOT_DATA.get(id);
-
-        const res = await stub.fetch('https://dummy/updateSettings', {
+        const user = interactionUser(interaction);
+        await userData(env, user.id).fetch('https://dummy/updateSettings', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ [setting]: value })
+          body: JSON.stringify({ [setting]: value }),
         });
 
-        const response = await res.json()
-
-        return new JsonResponse({
-          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-          data: {
-            content: `Updated the ${setting} value to ${value}`,
-            flags: InteractionResponseFlags.EPHEMERAL,
-          },
-        })
+        return ephemeralText(`Updated the ${setting} value to ${value}`);
       }
 
       case LENGTHWAVE_COMMAND.name.toLowerCase(): {
@@ -563,53 +526,27 @@ router.post('/', async (request, env) => {
 
         const position = position_raw ? parseFloat(position_raw) : Math.random();
         if (Number.isNaN(position) || position < 0 || position > 1) {
-          return new JsonResponse({
-            type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-            data: {
-              content: 'Position must be a number between 0 and 1',
-              flags: InteractionResponseFlags.EPHEMERAL,
-            },
-          });
+          return ephemeralText('Position must be a number between 0 and 1');
         }
 
-        if ((!left || !right) && (left || right)) {
-          return new JsonResponse({
-            type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-            data: {
-              content: 'Please provide a left and right prompt',
-              flags: InteractionResponseFlags.EPHEMERAL,
-            },
-          });
+        if (!left !== !right) {
+          return ephemeralText('Please provide a left and right prompt');
         }
 
-        let prompts;
-
-        if (left && right) {
-          prompts = [[left, right]];
-        } else {
-          const selected = (prompts_category) ? PROMPTS[prompts_category] : undefined;
-          prompts = selected ? selected : ALL_PROMPTS[Math.floor(Math.random() * ALL_PROMPTS.length)];
+        if (prompts_category && !Object.hasOwn(PROMPTS, prompts_category)) {
+          return ephemeralText(
+            `Unknown category. Pick one of: ${Object.keys(PROMPTS).join(', ')}`,
+          );
         }
 
-        console.log(position)
-        const response_body = generate_message_embed(
-          prompts,
-          position
-        );
-
-        const id = env.NOXBOT_DATA.idFromName('lengthwave');
-        const stub = env.NOXBOT_DATA.get(id);
-        await stub.fetch('https://dummy/lengthwave', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ gameId: response_body.data.embeds[0].footer.text, game_data: response_body.data.game_data })
-        });
-
+        const prompts =
+          left && right
+            ? [[left, right]]
+            : (PROMPTS[prompts_category] ??
+              ALL_PROMPTS[Math.floor(Math.random() * ALL_PROMPTS.length)]);
 
         return new JsonResponse(
-          response_body
+          await saveGamut(env, generate_message_embed(prompts, position)),
         );
       }
 
@@ -622,67 +559,61 @@ router.post('/', async (request, env) => {
           (option) => option.name === 'emote',
         )?.value;
 
-        console.log(emoteUrl)
-        console.log(emoteName)
-
-        const guild = interaction.guild;
-        console.log(interaction.guild)
-        const emoteData = await image_to_buffer(emoteUrl);
-        console.log('got emote data')
-        const response = await add_emoji(env.DISCORD_TOKEN, guild.id, emoteName, emoteData);
-
-        if (!response.ok) {
-          return new JsonResponse({
-            type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-            data: {
-              content: `Failed to add ${emoteName} to the server!`,
-              flags: InteractionResponseFlags.EPHEMERAL,
-            },
-          })
+        const guildId = interaction.guild_id ?? interaction.guild?.id;
+        if (!guildId) {
+          return ephemeralText('Run /emote inside a server.');
         }
 
-        return new JsonResponse({
-          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-          data: {
-            content: `Added ${emoteName} to the server!`,
-            flags: InteractionResponseFlags.EPHEMERAL,
-          },
-        })
+        let emoteData;
+        try {
+          emoteData = await image_to_buffer(emoteUrl);
+        } catch (err) {
+          return ephemeralText(`Couldn't fetch that emote: ${err.message}`);
+        }
+
+        const response = await add_emoji(
+          env.DISCORD_TOKEN,
+          guildId,
+          emoteName,
+          emoteData,
+        );
+
+        if (!response.ok) {
+          const err = await response.text();
+          console.error('add_emoji failed:', response.status, err);
+          return ephemeralText(
+            `Failed to add ${emoteName} to the server! (${response.status})`,
+          );
+        }
+
+        return ephemeralText(`Added ${emoteName} to the server!`);
       }
 
       case TEST_COMMAND.name.toLowerCase(): {
-        const user = interaction.member.user;
-        const guild = interaction.guild;
-        console.log(`Test Command Invoked by ${user.id} in guild ${guild.id}`);
-        if (user.id === env.COOL_GUY) {
-          console.log('Cool guy invoked function');
-          const roleId = await createCoolRole(guild.id, env.DISCORD_TOKEN);
-          const assignedRole = await assignRole(
-            guild.id,
-            user.id,
-            roleId,
-            env.DISCORD_TOKEN,
-          );
+        const user = interactionUser(interaction);
+        const guildId = interaction.guild_id ?? interaction.guild?.id;
 
-          if (assignedRole.ok) {
-            return new JsonResponse({
-              type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-              data: {
-                content: `You have been given the cool role!`,
-                flags: InteractionResponseFlags.EPHEMERAL,
-              },
-            });
-          } else {
-            return new JsonResponse({
-              type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-              data: {
-                content: `You are not the cool guy!`,
-                flags: InteractionResponseFlags.EPHEMERAL,
-              },
-            });
-          }
+        if (!guildId || user?.id !== env.COOL_GUY) {
+          return ephemeralText('You are not the cool guy!');
         }
-        break;
+
+        const roleId = await createCoolRole(guildId, env.DISCORD_TOKEN);
+        if (!roleId) {
+          return ephemeralText('Could not create the cool role.');
+        }
+
+        const assignedRole = await assignRole(
+          guildId,
+          user.id,
+          roleId,
+          env.DISCORD_TOKEN,
+        );
+
+        return ephemeralText(
+          assignedRole.ok
+            ? 'You have been given the cool role!'
+            : 'Could not give you the cool role.',
+        );
       }
 
       default:

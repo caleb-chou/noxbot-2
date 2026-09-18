@@ -1,7 +1,7 @@
 {
   "name": "noxbot",
   "version": "1.0.0",
-  "description": "A simple discord bot that uses intents to post pictures from r/aww",
+  "description": "A Discord bot running on a Cloudflare Worker",
   "type": "module",
   "private": true,
   "main": "src/server.js",
@@ -18,10 +18,7 @@
   "author": "Justin Beckwith <justin.beckwith@gmail.com>",
   "license": "MIT",
   "dependencies": {
-    "better-sqlite3": "^11.9.1",
-    "cloudflare": "^4.2.0",
     "discord-interactions": "^4.0.0",
-    "discord.js": "^14.18.0",
     "itty-router": "^5.0.9"
   },
   "devDependencies": {
