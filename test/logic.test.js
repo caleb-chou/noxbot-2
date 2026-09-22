@@ -1,12 +1,19 @@
 import { expect } from 'chai';
 import { describe, it } from 'mocha';
-import { InteractionType } from 'discord-interactions';
+import {
+  InteractionType,
+  InteractionResponseType,
+} from 'discord-interactions';
 import {
   ALL_PROMPTS,
   calculate_score,
   generate_guess_response_message_embed,
 } from '../src/functions/lengthwave.js';
 import { UserData } from '../src/resources/UserData.js';
+import { createMailboxEmbed } from '../src/functions/mailbox.js';
+import { createChatStatsEmbed } from '../src/functions/chattrack.js';
+import { deferred, sendMailNotification } from '../src/util.js';
+import * as commands from '../src/commands.js';
 import server from '../src/server.js';
 import sinon from 'sinon';
 
@@ -46,6 +53,30 @@ describe('lengthwave', () => {
     expect(actual).to.not.include('Your guess');
     expect(guess).to.include('0.9');
     expect(lines.indexOf(actual)).to.not.equal(lines.indexOf(guess));
+  });
+
+  it('will not score the gamut creator, who already saw the answer', async () => {
+    const game_data = {
+      position: 0.5,
+      prompt: { left: 'a', right: 'b' },
+      creator: 'u1',
+    };
+    const ctx = fakeCtx({ g1: game_data });
+    const obj = new UserData(ctx);
+
+    // The DO still hands back the game; the worker is what refuses to bank it.
+    const res = await post(obj, '/lengthwave/guess', { gameId: 'g1', userId: 'u1' });
+    const { game_data: got } = await res.json();
+    expect(got.creator).to.equal('u1');
+
+    const body = generate_guess_response_message_embed(
+      'g1',
+      got,
+      0.5,
+      { username: 'nox', id: 'u1', avatar: null },
+      ' (your own gamut - not counted)',
+    );
+    expect(body.data.embeds[0].description).to.include('not counted');
   });
 
   it('scores by distance', () => {
@@ -132,6 +163,258 @@ describe('sendmail recipient validation', () => {
       expect(body.data.content).to.include('not a user ID');
     } finally {
       stub.restore();
+    }
+  });
+});
+
+describe('deferred responses', () => {
+  const interaction = { token: 'tok' };
+  const env = { DISCORD_APPLICATION_ID: 'app' };
+
+  it('acks within the window and edits the original afterwards', async () => {
+    const calls = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      calls.push({ url: String(url), ...init });
+      return new Response('{}');
+    };
+
+    try {
+      const res = await deferred(env, null, interaction, async () => ({
+        content: 'done',
+      }));
+      expect((await res.json()).type).to.equal(
+        InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
+      );
+      expect(calls).to.have.lengthOf(1);
+      expect(calls[0].url).to.include('/webhooks/app/tok/messages/@original');
+      expect(calls[0].method).to.equal('PATCH');
+      expect(JSON.parse(calls[0].body).content).to.equal('done');
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  it('reports a thrown error back to the user instead of hanging', async () => {
+    const calls = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      calls.push(JSON.parse(init.body));
+      return new Response('{}');
+    };
+
+    try {
+      await deferred(env, null, interaction, async () => {
+        throw new Error('7tv is down');
+      });
+      expect(calls[0].content).to.include('7tv is down');
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  it('hands the task to waitUntil when a context exists', async () => {
+    const pending = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response('{}');
+
+    try {
+      await deferred(
+        env,
+        { waitUntil: (p) => pending.push(p) },
+        interaction,
+        async () => ({ content: 'x' }),
+      );
+      expect(pending).to.have.lengthOf(1);
+      await Promise.all(pending);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+});
+
+describe('lengthwave scoring', () => {
+  it('/increment adds `by` so a 0-4 score can be banked in one call', async () => {
+    const ctx = fakeCtx({ gamut_score: 10 });
+    const res = await post(new UserData(ctx), '/increment', {
+      key: 'gamut_score',
+      by: 3,
+    });
+    expect(await res.json()).to.deep.equal({ gamut_score: 13 });
+  });
+
+  it('claims a guess once, so the same gamut cannot be farmed', async () => {
+    const ctx = fakeCtx({ g1: { position: 0.5, prompt: { left: 'a', right: 'b' } } });
+    const obj = new UserData(ctx);
+
+    const first = await post(obj, '/lengthwave/guess', { gameId: 'g1', userId: 'u1' });
+    expect((await first.json()).already).to.equal(false);
+
+    const second = await post(obj, '/lengthwave/guess', { gameId: 'g1', userId: 'u1' });
+    expect((await second.json()).already).to.equal(true);
+
+    const other = await post(obj, '/lengthwave/guess', { gameId: 'g1', userId: 'u2' });
+    expect((await other.json()).already).to.equal(false);
+  });
+
+  it('tracks the player roster without duplicates', async () => {
+    const ctx = fakeCtx();
+    const obj = new UserData(ctx);
+    await post(obj, '/lengthwave/players', { userId: 'u1' });
+    await post(obj, '/lengthwave/players', { userId: 'u1' });
+    await post(obj, '/lengthwave/players', { userId: 'u2' });
+
+    const res = await obj.fetch(new Request('https://dummy/lengthwave/players'));
+    expect((await res.json()).players).to.deep.equal(['u1', 'u2']);
+  });
+});
+
+describe('mailbox rendering', () => {
+  const longMail = {
+    sender: 'nox',
+    subject: 'a subject',
+    message: 'x'.repeat(2000),
+  };
+
+  it('shows the subject it collects', () => {
+    const body = createMailboxEmbed({ username: 'a', id: '1' }, [longMail]);
+    expect(body.data.embeds[0].fields[0].name).to.include('a subject');
+  });
+
+  it('keeps a full mailbox inside Discord field and embed limits', () => {
+    const body = createMailboxEmbed(
+      { username: 'a', id: '1' },
+      Array(10).fill(longMail),
+    );
+    const [embed] = body.data.embeds;
+    let total = 0;
+    for (const f of embed.fields) {
+      expect(f.name.length).to.be.at.most(256);
+      expect(f.value.length).to.be.at.most(1024);
+      total += f.name.length + f.value.length;
+    }
+    expect(total).to.be.at.most(6000);
+    expect(embed.fields[0].value).to.include('/readmail 1');
+  });
+});
+
+describe('chat stats', () => {
+  it('ranks words by count and caps the list', () => {
+    const words = Object.fromEntries(
+      Array.from({ length: 40 }, (_, i) => [`w${i}`, i]),
+    );
+    const { embeds } = createChatStatsEmbed({ username: 'a', id: '1' }, {
+      words,
+      messages: 99,
+    });
+    const lines = embeds[0].description.split('\n');
+    expect(lines).to.have.lengthOf(15);
+    expect(lines[0]).to.include('w39');
+    expect(embeds[0].footer.text).to.include('99');
+  });
+});
+
+describe('DM support', () => {
+  it('scopes every command to a context, and none is left undeclared', () => {
+    for (const [name, cmd] of Object.entries(commands)) {
+      expect(cmd.contexts, name).to.be.an('array').that.is.not.empty;
+      expect(cmd.integration_types, name).to.be.an('array').that.is.not.empty;
+    }
+  });
+
+  it('lets lengthwave run in bot DMs and group DMs', () => {
+    expect(commands.LENGTHWAVE_COMMAND.contexts).to.deep.equal([0, 1, 2]);
+    expect(commands.LENGTHWAVE_COMMAND.integration_types).to.include(1);
+  });
+
+  it('keeps guild-only commands out of DMs', () => {
+    for (const cmd of [
+      commands.EMOTE_COMMAND,
+      commands.PICK_RANDOM_USER_COMMAND,
+      commands.CHAT_TRACK_COMMAND,
+      commands.TEST_COMMAND,
+      commands.UPDATE_STATS_COMMAND,
+    ]) {
+      expect(cmd.contexts, cmd.name).to.deep.equal([0]);
+      expect(cmd.integration_types, cmd.name).to.deep.equal([0]);
+    }
+  });
+
+  it('lets personal commands run in a DM and as a user install', () => {
+    for (const cmd of [
+      commands.CHECK_MAILBOX_COMMAND,
+      commands.READ_MAIL_COMMAND,
+      commands.GET_SETTINGS_COMMAND,
+      commands.EIGHTBALL_COMMAND,
+    ]) {
+      expect(cmd.contexts, cmd.name).to.include(1); // bot DM
+      expect(cmd.integration_types, cmd.name).to.include(1); // user install
+    }
+  });
+
+  it('does not require a user on /getstats, so it works alone in a DM', () => {
+    const userOption = commands.GET_STATS_COMMAND.options.find(
+      (o) => o.name === 'user',
+    );
+    expect(userOption.required).to.equal(false);
+  });
+
+  it('handles the mailbox button that the new-mail DM carries', async () => {
+    const stub = sinon.stub(server, 'verifyDiscordRequest').resolves({
+      isValid: true,
+      interaction: {
+        type: InteractionType.MESSAGE_COMPONENT,
+        user: { id: '7', username: 'nox', avatar: null }, // a DM: no `member`
+        data: { custom_id: 'check_mailbox' },
+      },
+    });
+
+    try {
+      const env = {
+        NOXBOT_DATA: {
+          idFromName: (n) => n,
+          get: () => ({
+            fetch: async () =>
+              new Response(JSON.stringify({ mailbox: [
+                { sender: 'a', subject: 's', message: 'hello' },
+              ] })),
+          }),
+        },
+      };
+      const res = await server.fetch(
+        { method: 'POST', url: new URL('/', 'http://discordo.example') },
+        env,
+      );
+      const body = await res.json();
+      expect(body.data.embeds[0].author.name).to.include("nox's Mailbox");
+      expect(body.data.embeds[0].fields[0].value).to.equal('hello');
+    } finally {
+      stub.restore();
+    }
+  });
+
+  it('puts the sender and subject in the new-mail DM, with an open button', async () => {
+    const sent = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      sent.push({ url: String(url), body: JSON.parse(init.body) });
+      return new Response(JSON.stringify({ id: 'dm1' }));
+    };
+
+    try {
+      await sendMailNotification(
+        '123',
+        { sender: 'nox', subject: 'hi there', timestamp: '2026-01-01T00:00:00Z' },
+        { DISCORD_TOKEN: 't' },
+      );
+      const message = sent.at(-1).body;
+      expect(message.embeds[0].description).to.include('hi there');
+      expect(message.embeds[0].footer.text).to.include('nox');
+      expect(message.components[0].components[0].custom_id).to.equal(
+        'check_mailbox',
+      );
+    } finally {
+      globalThis.fetch = realFetch;
     }
   });
 });

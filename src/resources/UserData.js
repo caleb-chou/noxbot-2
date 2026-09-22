@@ -1,5 +1,6 @@
 // Not stats: /get feeds the stats embed and must not leak these.
 const INTERNAL_KEYS = new Set(['mailbox', 'settings']);
+const isInternal = (key) => INTERNAL_KEYS.has(key) || key.startsWith('chat:');
 
 export class UserData {
   constructor(ctx, env) {
@@ -15,7 +16,11 @@ export class UserData {
       if (!data.key) {
         return new Response('Invalid data', { status: 400 });
       }
-      const count = ((await this.state.storage.get(data.key)) || 0) + 1;
+      const by = Number(data.by ?? 1);
+      if (!Number.isFinite(by)) {
+        return new Response('Invalid data', { status: 400 });
+      }
+      const count = ((await this.state.storage.get(data.key)) || 0) + by;
       await this.state.storage.put(data.key, count);
       return new Response(JSON.stringify({ [data.key]: count }), {
         headers: { 'Content-Type': 'application/json' },
@@ -25,7 +30,7 @@ export class UserData {
     if (pathname === '/get') {
       const allData = await this.state.storage.list();
       const stats = Object.fromEntries(
-        [...allData].filter(([key]) => !INTERNAL_KEYS.has(key)),
+        [...allData].filter(([key]) => !isInternal(key)),
       );
       return new Response(JSON.stringify(stats), {
         headers: { 'Content-Type': 'application/json' },
@@ -167,6 +172,56 @@ export class UserData {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       });
+    }
+
+    // Claim a guess. The DO runs single-threaded, so the read-modify-write of
+    // the guessed list is atomic and nobody can score the same gamut twice.
+    if (pathname === '/lengthwave/guess' && request.method === 'POST') {
+      const { gameId, userId } = await request.json();
+      const game_data = await this.state.storage.get(gameId);
+
+      if (!game_data) {
+        return Response.json({ error: 'Game not found' }, { status: 404 });
+      }
+
+      const guessed = game_data.guessed ?? [];
+      const already = guessed.includes(userId);
+      if (!already) {
+        game_data.guessed = [...guessed, userId];
+        await this.state.storage.put(gameId, game_data);
+      }
+
+      return Response.json({ game_data, already });
+    }
+
+    // ponytail: one global roster, not per-guild. Split by guild if this bot
+    // ever lives in more than one server.
+    if (pathname === '/lengthwave/players' && request.method === 'POST') {
+      const { userId } = await request.json();
+      const players = (await this.state.storage.get('players')) ?? [];
+
+      if (!players.includes(userId)) {
+        await this.state.storage.put('players', [...players, userId]);
+      }
+
+      return Response.json({ ok: true });
+    }
+
+    if (pathname === '/lengthwave/players') {
+      return Response.json({
+        players: (await this.state.storage.get('players')) ?? [],
+      });
+    }
+
+    if (pathname === '/getChat') {
+      const key = `chat:${searchParams.get('channelId')}`;
+      return Response.json((await this.state.storage.get(key)) ?? {});
+    }
+
+    if (pathname === '/setChat' && request.method === 'POST') {
+      const key = `chat:${searchParams.get('channelId')}`;
+      await this.state.storage.put(key, await request.json());
+      return Response.json({ ok: true });
     }
 
     return new Response('Not found', { status: 404 });

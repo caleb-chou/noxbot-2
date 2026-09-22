@@ -1,5 +1,4 @@
-
-const DISCORD_API = 'https://discord.com/api/v10';
+import { DISCORD_API } from '../util.js';
 
 export async function createCoolRole(guildId, token) {
     const response = await fetch(`${DISCORD_API}/guilds/${guildId}/roles`, {
