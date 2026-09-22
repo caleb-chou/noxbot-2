@@ -25,10 +25,20 @@ import {
   DELETE_MAIL_COMMAND,
   LENGTHWAVE_COMMAND,
   EMOTE_COMMAND,
+  READ_MAIL_COMMAND,
+  PICK_RANDOM_USER_COMMAND,
+  CHAT_TRACK_COMMAND,
+  LEADERBOARD_COMMAND,
 } from './commands.js';
 import { createCoolRole, assignRole } from './functions/coolrole.js';
 import { UserData } from './resources/UserData.js';
-import { JsonResponse, sendMailNotification, interactionUser } from './util.js';
+import {
+  JsonResponse,
+  sendMailNotification,
+  interactionUser,
+  deferred,
+  DISCORD_API,
+} from './util.js';
 import { coinFlip } from './functions/coinflip.js';
 import { eightBall } from './functions/eightball.js';
 import {
@@ -38,9 +48,19 @@ import {
   generate_guess_response_message_embed,
   generate_guesser_message_embed,
   generate_message_embed,
+  score_guess,
   PROMPTS,
 } from './functions/lengthwave.js';
-import { createMailboxModal, createMailboxEmbed } from './functions/mailbox.js';
+import {
+  createMailboxModal,
+  createMailboxEmbed,
+  createSingleMailEmbed,
+} from './functions/mailbox.js';
+import {
+  createChatStatsEmbed,
+  getStatsOnUser,
+  newestMessageId,
+} from './functions/chattrack.js';
 import { add_emoji, image_to_buffer } from './functions/emoji.js';
 
 const router = AutoRouter();
@@ -85,7 +105,7 @@ router.get('/', (request, env) => {
  * include a JSON payload described here:
  * https://discord.com/developers/docs/interactions/receiving-and-responding#interaction-object
  */
-router.post('/', async (request, env) => {
+router.post('/', async (request, env, ctx) => {
   const { isValid, interaction } = await server.verifyDiscordRequest(
     request,
     env,
@@ -189,20 +209,50 @@ router.post('/', async (request, env) => {
         return ephemeralText('Your guess must be a number between 0 and 1.');
       }
 
+      const user = interactionUser(interaction);
       const res = await userData(env, 'lengthwave').fetch(
-        `https://dummy/lengthwave?gameId=${game_id}`,
+        'https://dummy/lengthwave/guess',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ gameId: game_id, userId: user.id }),
+        },
       );
       if (!res.ok) {
         return ephemeralText('That gamut is gone — start a new one with /lengthwave.');
       }
-      const game_data = await res.json();
+      const { game_data, already } = await res.json();
+
+      if (!already) {
+        const { score } = score_guess(game_data, guess);
+        const stub = userData(env, user.id);
+        await stub.fetch('https://dummy/increment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: 'gamut_score', by: score }),
+        });
+        await stub.fetch('https://dummy/increment', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ key: 'gamut_games', by: 1 }),
+        });
+        await userData(env, 'lengthwave').fetch(
+          'https://dummy/lengthwave/players',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ userId: user.id }),
+          },
+        );
+      }
 
       return new JsonResponse(
         generate_guess_response_message_embed(
           game_id,
           game_data,
           guess,
-          interactionUser(interaction),
+          user,
+          !already,
         ),
       );
     }
@@ -564,29 +614,182 @@ router.post('/', async (request, env) => {
           return ephemeralText('Run /emote inside a server.');
         }
 
-        let emoteData;
-        try {
-          emoteData = await image_to_buffer(emoteUrl);
-        } catch (err) {
-          return ephemeralText(`Couldn't fetch that emote: ${err.message}`);
-        }
+        return deferred(
+          env,
+          ctx,
+          interaction,
+          async () => {
+            const emoteData = await image_to_buffer(emoteUrl);
+            const response = await add_emoji(
+              env.DISCORD_TOKEN,
+              guildId,
+              emoteName,
+              emoteData,
+            );
 
-        const response = await add_emoji(
-          env.DISCORD_TOKEN,
-          guildId,
-          emoteName,
-          emoteData,
+            if (!response.ok) {
+              const err = await response.text();
+              console.error('add_emoji failed:', response.status, err);
+              throw new Error(`Discord rejected it (${response.status})`);
+            }
+
+            return { content: `Added ${emoteName} to the server!` };
+          },
+          true,
         );
+      }
 
-        if (!response.ok) {
-          const err = await response.text();
-          console.error('add_emoji failed:', response.status, err);
+      case READ_MAIL_COMMAND.name.toLowerCase(): {
+        const index = interaction.data.options?.find(
+          (option) => option.name === 'index',
+        )?.value;
+
+        const user = interactionUser(interaction);
+        const res = await userData(env, user.id).fetch('https://dummy/getMailbox');
+        const { mailbox } = await res.json();
+        const mail = mailbox[index - 1];
+
+        if (!mail) {
           return ephemeralText(
-            `Failed to add ${emoteName} to the server! (${response.status})`,
+            mailbox.length
+              ? `Pick a mail between 1 and ${mailbox.length}.`
+              : 'You have no mail.',
           );
         }
 
-        return ephemeralText(`Added ${emoteName} to the server!`);
+        return new JsonResponse(createSingleMailEmbed(mail, index));
+      }
+
+      case LEADERBOARD_COMMAND.name.toLowerCase(): {
+        return deferred(env, ctx, interaction, async () => {
+          const { players } = await (
+            await userData(env, 'lengthwave').fetch(
+              'https://dummy/lengthwave/players',
+            )
+          ).json();
+
+          if (players.length === 0) {
+            return { content: 'Nobody has guessed a gamut yet. `/lengthwave`!' };
+          }
+
+          // Only people who have actually played, so this stays small.
+          const rows = await Promise.all(
+            players.map(async (id) => {
+              const stats = await (
+                await userData(env, id).fetch('https://dummy/get')
+              ).json();
+              return {
+                id,
+                score: stats.gamut_score ?? 0,
+                games: stats.gamut_games ?? 0,
+              };
+            }),
+          );
+
+          rows.sort((a, b) => b.score - a.score);
+
+          return {
+            embeds: [
+              {
+                title: '🧠 Gamut leaderboard',
+                description: rows
+                  .slice(0, 10)
+                  .map(
+                    (r, i) =>
+                      `${i + 1}. <@${r.id}> — **${r.score}** over ${r.games} guess${r.games === 1 ? '' : 'es'}`,
+                  )
+                  .join('\n'),
+                color: 0x5865f2,
+              },
+            ],
+            allowed_mentions: { parse: [] },
+          };
+        });
+      }
+
+      case PICK_RANDOM_USER_COMMAND.name.toLowerCase(): {
+        const guildId = interaction.guild_id ?? interaction.guild?.id;
+        if (!guildId) {
+          return ephemeralText('Run /choosesomeone inside a server.');
+        }
+
+        return deferred(env, ctx, interaction, async () => {
+          // Needs the GUILD_MEMBERS privileged intent in the dev portal.
+          const res = await fetch(
+            `${DISCORD_API}/guilds/${guildId}/members?limit=1000`,
+            { headers: { Authorization: `Bot ${env.DISCORD_TOKEN}` } },
+          );
+          if (!res.ok) {
+            throw new Error(
+              `couldn't list members (${res.status}) — is the GUILD_MEMBERS intent on?`,
+            );
+          }
+
+          const members = (await res.json()).filter((m) => !m.user.bot);
+          if (members.length === 0) {
+            throw new Error('nobody here to choose from');
+          }
+
+          const picked = members[Math.floor(Math.random() * members.length)];
+          return {
+            content: `\uD83C\uDFB2 I choose <@${picked.user.id}>!`,
+            // Render the mention without actually pinging them.
+            allowed_mentions: { parse: [] },
+          };
+        });
+      }
+
+      case CHAT_TRACK_COMMAND.name.toLowerCase(): {
+        const target = interaction.data.options?.find(
+          (option) => option.name === 'user',
+        )?.value;
+        const self = interactionUser(interaction);
+        const userId = target ?? self.id;
+        const user = target
+          ? interaction.data.resolved?.users?.[target]
+          : self;
+        const channelId = interaction.channel_id;
+
+        if (!channelId) {
+          return ephemeralText('Run /chattrack in a channel.');
+        }
+
+        return deferred(env, ctx, interaction, async () => {
+          const stub = userData(env, userId);
+          const chatData = await (
+            await stub.fetch(`https://dummy/getChat?channelId=${channelId}`)
+          ).json();
+
+          const save = (data) =>
+            stub.fetch(`https://dummy/setChat?channelId=${channelId}`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(data),
+            });
+
+          // First run: mark where to start. Backfilling a whole channel is
+          // tens of thousands of rate-limited requests, so we count forward.
+          if (!chatData.lastMessageId) {
+            const watermark = await newestMessageId(channelId, env.DISCORD_TOKEN);
+            if (!watermark) {
+              throw new Error('this channel has no messages yet');
+            }
+            await save({ words: {}, messages: 0, lastMessageId: watermark });
+            return {
+              content: `Now tracking ${user?.username ?? 'that user'} in this channel from here on. Run \`/chattrack\` again later to see counts.`,
+            };
+          }
+
+          const updated = await getStatsOnUser(
+            channelId,
+            userId,
+            chatData,
+            env.DISCORD_TOKEN,
+          );
+          await save(updated);
+
+          return createChatStatsEmbed(user ?? { username: 'that user' }, updated);
+        });
       }
 
       case TEST_COMMAND.name.toLowerCase(): {

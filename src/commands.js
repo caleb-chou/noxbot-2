@@ -38,11 +38,6 @@ export const INCREMENT_STATS_COMMAND = {
   ]
 };
 
-export const SET_USER_DATA = {
-  name: 'setuserdata',
-  description: 'Sets data for user',
-};
-
 export const COINFLIP_COMMAND = {
   name: 'coinflip',
   description: 'Flips a coin',
@@ -184,6 +179,24 @@ export const DELETE_MAIL_COMMAND = {
 export const PICK_RANDOM_USER_COMMAND = {
   name: 'choosesomeone',
   description: 'Pick someone random!'
+}
+
+export const READ_MAIL_COMMAND = {
+  name: 'readmail',
+  description: 'Read one piece of mail in full',
+  options: [
+    {
+      name: 'index',
+      description: 'Which mail to read',
+      type: 4,
+      required: true
+    }
+  ]
+}
+
+export const LEADERBOARD_COMMAND = {
+  name: 'leaderboard',
+  description: 'Who reads minds best?',
 }
 
 export const UPDATE_SETTINGS_COMMAND = {

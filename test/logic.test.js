@@ -1,12 +1,18 @@
 import { expect } from 'chai';
 import { describe, it } from 'mocha';
-import { InteractionType } from 'discord-interactions';
+import {
+  InteractionType,
+  InteractionResponseType,
+} from 'discord-interactions';
 import {
   ALL_PROMPTS,
   calculate_score,
   generate_guess_response_message_embed,
 } from '../src/functions/lengthwave.js';
 import { UserData } from '../src/resources/UserData.js';
+import { createMailboxEmbed } from '../src/functions/mailbox.js';
+import { createChatStatsEmbed } from '../src/functions/chattrack.js';
+import { deferred } from '../src/util.js';
 import server from '../src/server.js';
 import sinon from 'sinon';
 
@@ -133,5 +139,152 @@ describe('sendmail recipient validation', () => {
     } finally {
       stub.restore();
     }
+  });
+});
+
+describe('deferred responses', () => {
+  const interaction = { token: 'tok' };
+  const env = { DISCORD_APPLICATION_ID: 'app' };
+
+  it('acks within the window and edits the original afterwards', async () => {
+    const calls = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      calls.push({ url: String(url), ...init });
+      return new Response('{}');
+    };
+
+    try {
+      const res = await deferred(env, null, interaction, async () => ({
+        content: 'done',
+      }));
+      expect((await res.json()).type).to.equal(
+        InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
+      );
+      expect(calls).to.have.lengthOf(1);
+      expect(calls[0].url).to.include('/webhooks/app/tok/messages/@original');
+      expect(calls[0].method).to.equal('PATCH');
+      expect(JSON.parse(calls[0].body).content).to.equal('done');
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  it('reports a thrown error back to the user instead of hanging', async () => {
+    const calls = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      calls.push(JSON.parse(init.body));
+      return new Response('{}');
+    };
+
+    try {
+      await deferred(env, null, interaction, async () => {
+        throw new Error('7tv is down');
+      });
+      expect(calls[0].content).to.include('7tv is down');
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  it('hands the task to waitUntil when a context exists', async () => {
+    const pending = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async () => new Response('{}');
+
+    try {
+      await deferred(
+        env,
+        { waitUntil: (p) => pending.push(p) },
+        interaction,
+        async () => ({ content: 'x' }),
+      );
+      expect(pending).to.have.lengthOf(1);
+      await Promise.all(pending);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+});
+
+describe('lengthwave scoring', () => {
+  it('/increment adds `by` so a 0-4 score can be banked in one call', async () => {
+    const ctx = fakeCtx({ gamut_score: 10 });
+    const res = await post(new UserData(ctx), '/increment', {
+      key: 'gamut_score',
+      by: 3,
+    });
+    expect(await res.json()).to.deep.equal({ gamut_score: 13 });
+  });
+
+  it('claims a guess once, so the same gamut cannot be farmed', async () => {
+    const ctx = fakeCtx({ g1: { position: 0.5, prompt: { left: 'a', right: 'b' } } });
+    const obj = new UserData(ctx);
+
+    const first = await post(obj, '/lengthwave/guess', { gameId: 'g1', userId: 'u1' });
+    expect((await first.json()).already).to.equal(false);
+
+    const second = await post(obj, '/lengthwave/guess', { gameId: 'g1', userId: 'u1' });
+    expect((await second.json()).already).to.equal(true);
+
+    const other = await post(obj, '/lengthwave/guess', { gameId: 'g1', userId: 'u2' });
+    expect((await other.json()).already).to.equal(false);
+  });
+
+  it('tracks the player roster without duplicates', async () => {
+    const ctx = fakeCtx();
+    const obj = new UserData(ctx);
+    await post(obj, '/lengthwave/players', { userId: 'u1' });
+    await post(obj, '/lengthwave/players', { userId: 'u1' });
+    await post(obj, '/lengthwave/players', { userId: 'u2' });
+
+    const res = await obj.fetch(new Request('https://dummy/lengthwave/players'));
+    expect((await res.json()).players).to.deep.equal(['u1', 'u2']);
+  });
+});
+
+describe('mailbox rendering', () => {
+  const longMail = {
+    sender: 'nox',
+    subject: 'a subject',
+    message: 'x'.repeat(2000),
+  };
+
+  it('shows the subject it collects', () => {
+    const body = createMailboxEmbed({ username: 'a', id: '1' }, [longMail]);
+    expect(body.data.embeds[0].fields[0].name).to.include('a subject');
+  });
+
+  it('keeps a full mailbox inside Discord field and embed limits', () => {
+    const body = createMailboxEmbed(
+      { username: 'a', id: '1' },
+      Array(10).fill(longMail),
+    );
+    const [embed] = body.data.embeds;
+    let total = 0;
+    for (const f of embed.fields) {
+      expect(f.name.length).to.be.at.most(256);
+      expect(f.value.length).to.be.at.most(1024);
+      total += f.name.length + f.value.length;
+    }
+    expect(total).to.be.at.most(6000);
+    expect(embed.fields[0].value).to.include('/readmail 1');
+  });
+});
+
+describe('chat stats', () => {
+  it('ranks words by count and caps the list', () => {
+    const words = Object.fromEntries(
+      Array.from({ length: 40 }, (_, i) => [`w${i}`, i]),
+    );
+    const { embeds } = createChatStatsEmbed({ username: 'a', id: '1' }, {
+      words,
+      messages: 99,
+    });
+    const lines = embeds[0].description.split('\n');
+    expect(lines).to.have.lengthOf(15);
+    expect(lines[0]).to.include('w39');
+    expect(embeds[0].footer.text).to.include('99');
   });
 });
