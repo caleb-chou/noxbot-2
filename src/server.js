@@ -80,6 +80,12 @@ const userData = (env, name) =>
 const isAdmin = (interaction) =>
   (BigInt(interaction.member?.permissions ?? 0) & ADMINISTRATOR) !== 0n;
 
+async function mailboxResponse(env, user) {
+  const res = await userData(env, user.id).fetch('https://dummy/getMailbox');
+  const { mailbox } = await res.json();
+  return new JsonResponse(createMailboxEmbed(user, mailbox));
+}
+
 /** Persist a gamut so the clue/guess modals can look its answer up later. */
 async function saveGamut(env, body) {
   await userData(env, 'lengthwave').fetch('https://dummy/lengthwave', {
@@ -172,7 +178,7 @@ router.post('/', async (request, env, ctx) => {
       const userSettings = await settingsRes.json();
 
       if (userSettings.notifyForMail === 'true') {
-        await sendMailNotification(recipient, env);
+        await sendMailNotification(recipient, mail, env);
       }
 
       return ephemeralText(response.message);
@@ -262,6 +268,10 @@ router.post('/', async (request, env, ctx) => {
 
     const customId = interaction.data.custom_id;
 
+    if (customId === 'check_mailbox') {
+      return mailboxResponse(env, interactionUser(interaction));
+    }
+
     if (customId === 'gamut_clue_button') {
       const game_id = interaction.message.embeds[0].footer.text;
       return new JsonResponse(createLengthWaveClueModal(game_id));
@@ -337,9 +347,10 @@ router.post('/', async (request, env, ctx) => {
       }
 
       case GET_STATS_COMMAND.name.toLowerCase(): {
-        const userId = interaction.data.options?.find(
-          (option) => option.name === 'user',
-        )?.value;
+        const self = interactionUser(interaction);
+        const userId =
+          interaction.data.options?.find((option) => option.name === 'user')
+            ?.value ?? self.id;
 
         const stat = interaction.data.options?.find(
           (option) => option.name === 'stat',
@@ -352,7 +363,7 @@ router.post('/', async (request, env, ctx) => {
         const res = await userData(env, userId).fetch('https://dummy/get');
         const data = await res.json();
 
-        const resolvedUser = interaction.data.resolved?.users?.[userId];
+        const resolvedUser = interaction.data.resolved?.users?.[userId] ?? self;
 
         const username = resolvedUser?.username;
         const avatar = resolvedUser?.avatar;
@@ -503,11 +514,7 @@ router.post('/', async (request, env, ctx) => {
       }
 
       case CHECK_MAILBOX_COMMAND.name.toLowerCase(): {
-        const user = interactionUser(interaction);
-        const res = await userData(env, user.id).fetch('https://dummy/getMailbox');
-        const { mailbox } = await res.json();
-
-        return new JsonResponse(createMailboxEmbed(user, mailbox));
+        return mailboxResponse(env, interactionUser(interaction));
       }
 
       case DELETE_MAIL_COMMAND.name.toLowerCase(): {

@@ -12,7 +12,8 @@ import {
 import { UserData } from '../src/resources/UserData.js';
 import { createMailboxEmbed } from '../src/functions/mailbox.js';
 import { createChatStatsEmbed } from '../src/functions/chattrack.js';
-import { deferred } from '../src/util.js';
+import { deferred, sendMailNotification } from '../src/util.js';
+import * as commands from '../src/commands.js';
 import server from '../src/server.js';
 import sinon from 'sinon';
 
@@ -286,5 +287,105 @@ describe('chat stats', () => {
     expect(lines).to.have.lengthOf(15);
     expect(lines[0]).to.include('w39');
     expect(embeds[0].footer.text).to.include('99');
+  });
+});
+
+describe('DM support', () => {
+  it('scopes every command to a context, and none is left undeclared', () => {
+    for (const [name, cmd] of Object.entries(commands)) {
+      expect(cmd.contexts, name).to.be.an('array').that.is.not.empty;
+      expect(cmd.integration_types, name).to.be.an('array').that.is.not.empty;
+    }
+  });
+
+  it('keeps guild-only commands out of DMs', () => {
+    for (const cmd of [
+      commands.EMOTE_COMMAND,
+      commands.PICK_RANDOM_USER_COMMAND,
+      commands.CHAT_TRACK_COMMAND,
+      commands.TEST_COMMAND,
+      commands.UPDATE_STATS_COMMAND,
+    ]) {
+      expect(cmd.contexts, cmd.name).to.deep.equal([0]);
+      expect(cmd.integration_types, cmd.name).to.deep.equal([0]);
+    }
+  });
+
+  it('lets personal commands run in a DM and as a user install', () => {
+    for (const cmd of [
+      commands.CHECK_MAILBOX_COMMAND,
+      commands.READ_MAIL_COMMAND,
+      commands.GET_SETTINGS_COMMAND,
+      commands.EIGHTBALL_COMMAND,
+    ]) {
+      expect(cmd.contexts, cmd.name).to.include(1); // bot DM
+      expect(cmd.integration_types, cmd.name).to.include(1); // user install
+    }
+  });
+
+  it('does not require a user on /getstats, so it works alone in a DM', () => {
+    const userOption = commands.GET_STATS_COMMAND.options.find(
+      (o) => o.name === 'user',
+    );
+    expect(userOption.required).to.equal(false);
+  });
+
+  it('handles the mailbox button that the new-mail DM carries', async () => {
+    const stub = sinon.stub(server, 'verifyDiscordRequest').resolves({
+      isValid: true,
+      interaction: {
+        type: InteractionType.MESSAGE_COMPONENT,
+        user: { id: '7', username: 'nox', avatar: null }, // a DM: no `member`
+        data: { custom_id: 'check_mailbox' },
+      },
+    });
+
+    try {
+      const env = {
+        NOXBOT_DATA: {
+          idFromName: (n) => n,
+          get: () => ({
+            fetch: async () =>
+              new Response(JSON.stringify({ mailbox: [
+                { sender: 'a', subject: 's', message: 'hello' },
+              ] })),
+          }),
+        },
+      };
+      const res = await server.fetch(
+        { method: 'POST', url: new URL('/', 'http://discordo.example') },
+        env,
+      );
+      const body = await res.json();
+      expect(body.data.embeds[0].author.name).to.include("nox's Mailbox");
+      expect(body.data.embeds[0].fields[0].value).to.equal('hello');
+    } finally {
+      stub.restore();
+    }
+  });
+
+  it('puts the sender and subject in the new-mail DM, with an open button', async () => {
+    const sent = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      sent.push({ url: String(url), body: JSON.parse(init.body) });
+      return new Response(JSON.stringify({ id: 'dm1' }));
+    };
+
+    try {
+      await sendMailNotification(
+        '123',
+        { sender: 'nox', subject: 'hi there', timestamp: '2026-01-01T00:00:00Z' },
+        { DISCORD_TOKEN: 't' },
+      );
+      const message = sent.at(-1).body;
+      expect(message.embeds[0].description).to.include('hi there');
+      expect(message.embeds[0].footer.text).to.include('nox');
+      expect(message.components[0].components[0].custom_id).to.equal(
+        'check_mailbox',
+      );
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 });

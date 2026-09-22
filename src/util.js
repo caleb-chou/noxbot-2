@@ -71,7 +71,11 @@ export async function deferred(env, ctx, interaction, work, ephemeral = false) {
   });
 }
 
-export async function sendMailNotification(recipientId, env) {
+/**
+ * DM someone that mail arrived. The button posts a `check_mailbox` component
+ * interaction back to this worker, so they can read it without leaving the DM.
+ */
+export async function sendMailNotification(recipientId, mail, env) {
   const botToken = env.DISCORD_TOKEN; // you should store your bot token safely in environment variables
 
   // Step 1: Create a DM channel
@@ -101,7 +105,28 @@ export async function sendMailNotification(recipientId, env) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      content: `📬 You have new mail waiting for you! Check it with the \`/checkmail\` command!`,
+      embeds: [
+        {
+          title: '📬 You have new mail!',
+          description: mail?.subject ? `**${mail.subject}**` : undefined,
+          color: 0x3498db,
+          footer: { text: `From @${mail?.sender ?? 'someone'}` },
+          timestamp: mail?.timestamp,
+        },
+      ],
+      components: [
+        {
+          type: 1, // Action row
+          components: [
+            {
+              type: 2, // Button
+              style: 1, // Primary
+              label: 'Open mailbox',
+              custom_id: 'check_mailbox',
+            },
+          ],
+        },
+      ],
     }),
   });
 
