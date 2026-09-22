@@ -55,6 +55,30 @@ describe('lengthwave', () => {
     expect(lines.indexOf(actual)).to.not.equal(lines.indexOf(guess));
   });
 
+  it('will not score the gamut creator, who already saw the answer', async () => {
+    const game_data = {
+      position: 0.5,
+      prompt: { left: 'a', right: 'b' },
+      creator: 'u1',
+    };
+    const ctx = fakeCtx({ g1: game_data });
+    const obj = new UserData(ctx);
+
+    // The DO still hands back the game; the worker is what refuses to bank it.
+    const res = await post(obj, '/lengthwave/guess', { gameId: 'g1', userId: 'u1' });
+    const { game_data: got } = await res.json();
+    expect(got.creator).to.equal('u1');
+
+    const body = generate_guess_response_message_embed(
+      'g1',
+      got,
+      0.5,
+      { username: 'nox', id: 'u1', avatar: null },
+      ' (your own gamut - not counted)',
+    );
+    expect(body.data.embeds[0].description).to.include('not counted');
+  });
+
   it('scores by distance', () => {
     expect(calculate_score(0)).to.equal(4);
     expect(calculate_score(0.05)).to.equal(3);
@@ -296,6 +320,11 @@ describe('DM support', () => {
       expect(cmd.contexts, name).to.be.an('array').that.is.not.empty;
       expect(cmd.integration_types, name).to.be.an('array').that.is.not.empty;
     }
+  });
+
+  it('lets lengthwave run in bot DMs and group DMs', () => {
+    expect(commands.LENGTHWAVE_COMMAND.contexts).to.deep.equal([0, 1, 2]);
+    expect(commands.LENGTHWAVE_COMMAND.integration_types).to.include(1);
   });
 
   it('keeps guild-only commands out of DMs', () => {

@@ -181,7 +181,7 @@ export function score_guess(game_data, guess) {
     return { distance, score: calculate_score(distance) };
 }
 
-export function generate_guess_response_message_embed(game_id, game_data, guess, user, scored = true) {
+export function generate_guess_response_message_embed(game_id, game_data, guess, user, note = '') {
     const { left, right } = game_data.prompt;
     const { distance, score } = score_guess(game_data, guess);
 
@@ -196,7 +196,7 @@ export function generate_guess_response_message_embed(game_id, game_data, guess,
                             ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png`
                             : undefined,
                     },
-                    description: `||\`\`\`md\n${left}\n${generate_gamut_result_string(game_data.position, guess)}${right}\n\n---\n# Your guess was ${guess}\n# Distance: ${Math.trunc(distance * 1000) / 1000}\n# Score: ${score}${scored ? '' : ' (already guessed - not counted)'}\`\`\`||`,
+                    description: `||\`\`\`md\n${left}\n${generate_gamut_result_string(game_data.position, guess)}${right}\n\n---\n# Your guess was ${guess}\n# Distance: ${Math.trunc(distance * 1000) / 1000}\n# Score: ${score}${note}\`\`\`||`,
                     color: 0x5865F2,
                     footer: {
                         text: `${game_id}`

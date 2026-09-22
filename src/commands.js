@@ -254,7 +254,7 @@ export const GET_SETTINGS_COMMAND = {
 }
 
 export const LENGTHWAVE_COMMAND = {
-  ...GUILD_ONLY,
+  ...ANYWHERE,
   name: 'lengthwave',
   description: 'Can you read each other\'s minds?',
   options: [

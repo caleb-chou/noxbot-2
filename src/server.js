@@ -87,13 +87,14 @@ async function mailboxResponse(env, user) {
 }
 
 /** Persist a gamut so the clue/guess modals can look its answer up later. */
-async function saveGamut(env, body) {
+async function saveGamut(env, body, creatorId) {
   await userData(env, 'lengthwave').fetch('https://dummy/lengthwave', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       gameId: body.data.embeds[0].footer.text,
-      game_data: body.data.game_data,
+      // The creator saw the position, so their own guess must never score.
+      game_data: { ...body.data.game_data, creator: creatorId },
     }),
   });
   return body;
@@ -229,7 +230,11 @@ router.post('/', async (request, env, ctx) => {
       }
       const { game_data, already } = await res.json();
 
-      if (!already) {
+      // In a 1:1 DM you can see your own gamut, so without this the
+      // leaderboard is farmable in private.
+      const ownGamut = game_data.creator === user.id;
+
+      if (!already && !ownGamut) {
         const { score } = score_guess(game_data, guess);
         const stub = userData(env, user.id);
         await stub.fetch('https://dummy/increment', {
@@ -258,7 +263,11 @@ router.post('/', async (request, env, ctx) => {
           game_data,
           guess,
           user,
-          !already,
+          already
+            ? ' (already guessed - not counted)'
+            : ownGamut
+              ? ' (your own gamut - not counted)'
+              : '',
         ),
       );
     }
@@ -280,7 +289,11 @@ router.post('/', async (request, env, ctx) => {
     if (customId === 'new_gamut_button') {
       const prompts = ALL_PROMPTS[Math.floor(Math.random() * ALL_PROMPTS.length)];
       return new JsonResponse(
-        await saveGamut(env, generate_message_embed(prompts)),
+        await saveGamut(
+          env,
+          generate_message_embed(prompts),
+          interactionUser(interaction).id,
+        ),
       );
     }
 
@@ -603,7 +616,11 @@ router.post('/', async (request, env, ctx) => {
               ALL_PROMPTS[Math.floor(Math.random() * ALL_PROMPTS.length)]);
 
         return new JsonResponse(
-          await saveGamut(env, generate_message_embed(prompts, position)),
+          await saveGamut(
+            env,
+            generate_message_embed(prompts, position),
+            interactionUser(interaction).id,
+          ),
         );
       }
 
