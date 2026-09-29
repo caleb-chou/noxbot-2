@@ -57,4 +57,5 @@ if (response.ok) {
     console.error('Error reading body from request:', err);
   }
   console.error(errorText);
+  process.exitCode = 1;
 }
