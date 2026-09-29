@@ -57,6 +57,7 @@ export const INCREMENT_STATS_COMMAND = {
       description: 'The stat to increment',
       type: 3, // STRING
       required: true,
+      autocomplete: true,
     }
   ]
 };
@@ -111,6 +112,7 @@ export const GET_STATS_COMMAND = {
       description: 'The stat to get',
       type: 3, // STRING
       required: false,
+      autocomplete: true,
     },
     {
       name: 'ephemeral',
@@ -138,6 +140,7 @@ export const UPDATE_STATS_COMMAND = {
       description: 'The stat to update',
       type: 3, // STRING
       required: true,
+      autocomplete: true,
     },
     {
       name: 'value',
@@ -246,13 +249,18 @@ export const UPDATE_SETTINGS_COMMAND = {
       name: 'setting',
       description: 'Which setting to change',
       type: 3,
-      required: true
+      required: true,
+      choices: [{ name: 'DM me when mail arrives', value: 'notifyForMail' }],
     },
     {
       name: 'value',
       description: 'Which value to change to',
       type: 3,
-      required: true
+      required: true,
+      choices: [
+        { name: 'on', value: 'true' },
+        { name: 'off', value: 'false' },
+      ],
     }
   ]
 }
@@ -335,3 +343,69 @@ export const CHAT_TRACK_COMMAND = {
     }
   ]
 }
+
+export const ROLL_COMMAND = {
+  ...ANYWHERE,
+  name: 'roll',
+  description: 'Roll some dice',
+  options: [
+    {
+      name: 'dice',
+      description: 'Like d20, 2d6 or 3d8+2 (default 1d6)',
+      type: 3, // STRING
+      required: false,
+      max_length: 20,
+    },
+  ],
+};
+
+export const REMINDME_COMMAND = {
+  ...ANYWHERE,
+  name: 'remindme',
+  description: 'Get a DM from the bot later',
+  options: [
+    {
+      name: 'in',
+      description: 'How long from now, like 10m, 2h30m or 3d',
+      type: 3, // STRING
+      required: true,
+      max_length: 20,
+    },
+    {
+      name: 'text',
+      description: 'What to remind you about',
+      type: 3, // STRING
+      required: true,
+      max_length: 1000,
+    },
+  ],
+};
+
+// Right-click menus. Context menu commands have a type and no description.
+const USER_MENU = 2;
+const MESSAGE_MENU = 3;
+
+export const SEND_MAIL_MENU = {
+  ...ANYWHERE,
+  type: USER_MENU,
+  name: 'Send mail',
+};
+
+export const GET_STATS_MENU = {
+  ...ANYWHERE,
+  type: USER_MENU,
+  name: 'Get stats',
+};
+
+export const STEAL_EMOJI_MENU = {
+  ...GUILD_ONLY,
+  ...EXPRESSION_MANAGERS,
+  type: MESSAGE_MENU,
+  name: 'Steal emoji',
+};
+
+export const REMINDERS_COMMAND = {
+  ...ANYWHERE,
+  name: 'reminders',
+  description: 'See your reminders, or cancel one',
+};

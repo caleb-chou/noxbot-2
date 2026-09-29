@@ -10,7 +10,13 @@ import {
   generate_guess_response_message_embed,
 } from '../src/functions/lengthwave.js';
 import { UserData } from '../src/resources/UserData.js';
-import { createMailboxEmbed } from '../src/functions/mailbox.js';
+import {
+  createMailboxEmbed,
+  createSingleMailEmbed,
+} from '../src/functions/mailbox.js';
+import { rollDice } from '../src/functions/roll.js';
+import { parseDuration } from '../src/functions/remind.js';
+import { stealEmoji } from '../src/functions/emoji.js';
 import {
   createChatStatsEmbed,
   getStatsOnUser,
@@ -29,9 +35,41 @@ function fakeCtx(initial = {}) {
       put: async (k, v) => void map.set(k, v),
       list: async () => new Map(map),
       delete: async (k) => [k].flat().forEach((key) => map.delete(key)),
+      setAlarm: async (t) => void (map.alarm = t),
+      deleteAlarm: async () => void delete map.alarm,
+      getAlarm: async () => map.alarm ?? null,
     },
   };
 }
+
+/** Run one interaction through the worker, skipping signature checks. */
+async function interact(interaction, env = {}) {
+  const stub = sinon
+    .stub(server, 'verifyDiscordRequest')
+    .resolves({ isValid: true, interaction });
+  try {
+    const res = await server.fetch(
+      { method: 'POST', url: new URL('/', 'http://discordo.example') },
+      env,
+    );
+    return res.json();
+  } finally {
+    stub.restore();
+  }
+}
+
+/** A NOXBOT_DATA binding where every DO is the same in-memory UserData. */
+const envWith = (obj) => ({
+  NOXBOT_DATA: {
+    idFromName: (n) => n,
+    get: () => ({
+      fetch: (input, init) =>
+        obj.fetch(
+          input instanceof Request ? input : new Request(input, init),
+        ),
+    }),
+  },
+});
 
 const post = (obj, path, body) =>
   obj.fetch(
@@ -502,5 +540,223 @@ describe('DM support', () => {
     } finally {
       globalThis.fetch = realFetch;
     }
+  });
+});
+
+describe('roll', () => {
+  it('rolls NdM+K within range', () => {
+    for (let i = 0; i < 50; i++) {
+      const { rolls, modifier, total } = rollDice('3d6+2');
+      expect(rolls).to.have.lengthOf(3);
+      for (const r of rolls) expect(r).to.be.within(1, 6);
+      expect(modifier).to.equal(2);
+      expect(total).to.equal(rolls.reduce((a, b) => a + b) + 2);
+    }
+    expect(rollDice('d20').rolls).to.have.lengthOf(1);
+    expect(rollDice().rolls[0]).to.be.within(1, 6);
+  });
+
+  it('rejects nonsense and absurd dice', () => {
+    for (const bad of ['abc', '2d', '0d6', '101d6', '1d1', '1d1001']) {
+      expect(() => rollDice(bad), bad).to.throw();
+    }
+  });
+});
+
+describe('remindme', () => {
+  it('parses compound durations and rejects junk', () => {
+    expect(parseDuration('90m')).to.equal(90 * 60_000);
+    expect(parseDuration('1d 2h')).to.equal(26 * 3_600_000);
+    expect(parseDuration('2H30M')).to.equal(150 * 60_000);
+    for (const bad of ['', 'soon', '5', '5x', '1h then 2m']) {
+      expect(parseDuration(bad), bad).to.be.NaN;
+    }
+  });
+
+  it('keeps the alarm on the earliest reminder and caps the list', async () => {
+    const ctx = fakeCtx();
+    const obj = new UserData(ctx);
+    await post(obj, '/addReminder', { userId: 'u', at: 5000, text: 'later' });
+    await post(obj, '/addReminder', { userId: 'u', at: 2000, text: 'sooner' });
+    expect(await ctx.storage.getAlarm()).to.equal(2000);
+
+    const full = fakeCtx({ reminders: Array(25).fill({ at: 1 }) });
+    const res = await post(new UserData(full), '/addReminder', { at: 9 });
+    expect(res.status).to.equal(400);
+  });
+
+  it('DMs due reminders when the alarm fires and re-arms for the rest', async () => {
+    const now = Date.now();
+    const ctx = fakeCtx({
+      reminders: [
+        { userId: 'u1', at: now - 1000, text: 'due', createdAt: now - 5000 },
+        { userId: 'u1', at: now + 60_000, text: 'not yet', createdAt: now },
+      ],
+    });
+    const sent = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = async (url, init) => {
+      sent.push(JSON.parse(init.body));
+      return Response.json({ id: 'dm' });
+    };
+
+    try {
+      await new UserData(ctx, { DISCORD_TOKEN: 't' }).alarm();
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+
+    expect(sent[0]).to.deep.equal({ recipient_id: 'u1' });
+    expect(sent[1].embeds[0].description).to.equal('due');
+    expect((await ctx.storage.get('reminders')).map((r) => r.text)).to.deep.equal([
+      'not yet',
+    ]);
+    expect(await ctx.storage.getAlarm()).to.equal(now + 60_000);
+  });
+
+  it('lists reminders and cancels by id, re-arming or clearing the alarm', async () => {
+    const ctx = fakeCtx();
+    const obj = new UserData(ctx);
+    await post(obj, '/addReminder', { userId: 'u', at: 2000, text: 'first' });
+    await post(obj, '/addReminder', { userId: 'u', at: 5000, text: 'second' });
+    const env = envWith(obj);
+    const user = { id: 'u', username: 'u' };
+
+    const list = await interact(
+      { type: InteractionType.APPLICATION_COMMAND, user, data: { name: 'reminders' } },
+      env,
+    );
+    expect(list.data.flags).to.equal(64);
+    expect(list.data.embeds[0].description).to.include('first');
+    const [first, second] = list.data.components[0].components[0].options;
+    expect(first.label).to.equal('1. first');
+
+    const cancel = (id) =>
+      interact(
+        {
+          type: InteractionType.MESSAGE_COMPONENT,
+          user,
+          data: { custom_id: 'cancel_reminder', values: [id] },
+        },
+        env,
+      );
+
+    const afterOne = await cancel(first.value);
+    expect(afterOne.type).to.equal(InteractionResponseType.UPDATE_MESSAGE);
+    expect(afterOne.data.embeds[0].description).to.not.include('first');
+    expect(await ctx.storage.getAlarm()).to.equal(5000);
+
+    const afterAll = await cancel(second.value);
+    expect(afterAll.data.content).to.include('No reminders');
+    expect(afterAll.data.components).to.deep.equal([]);
+    expect(await ctx.storage.getAlarm()).to.equal(null);
+  });
+
+  it('keeps reminders out of /getstats', async () => {
+    const ctx = fakeCtx({ kills: 1, reminders: [{ at: 1 }] });
+    const res = await new UserData(ctx).fetch(new Request('https://dummy/get'));
+    expect(await res.json()).to.deep.equal({ kills: 1 });
+  });
+});
+
+describe('steal emoji', () => {
+  it('takes the first custom emoji, as a gif when animated', async () => {
+    const realFetch = globalThis.fetch;
+    let fetched;
+    globalThis.fetch = async (url) => {
+      fetched = String(url);
+      return new Response(new Uint8Array([1, 2, 3]));
+    };
+    try {
+      const { name, data } = await stealEmoji('lol <a:party:123> <:x:9>');
+      expect(name).to.equal('party');
+      expect(fetched).to.equal('https://cdn.discordapp.com/emojis/123.gif');
+      expect(data).to.equal('data:image/gif;base64,AQID');
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  it('says so when the message has no custom emoji', async () => {
+    let error;
+    try {
+      await stealEmoji('just text 😀');
+    } catch (err) {
+      error = err;
+    }
+    expect(error.message).to.include('no custom emoji');
+  });
+});
+
+describe('context menus and autocomplete', () => {
+  it('"Get stats" shows the right-clicked user\'s stats, privately', async () => {
+    const body = await interact(
+      {
+        type: InteractionType.APPLICATION_COMMAND,
+        user: { id: 'me', username: 'me' },
+        data: {
+          name: commands.GET_STATS_MENU.name,
+          type: 2,
+          target_id: '42',
+          resolved: { users: { 42: { id: '42', username: 'them' } } },
+        },
+      },
+      envWith(new UserData(fakeCtx({ wins: 3 }))),
+    );
+    expect(body.data.embeds[0].author.name).to.equal('Stats for them');
+    expect(body.data.embeds[0].fields[0]).to.include({ name: 'wins', value: '3' });
+    expect(body.data.flags).to.equal(64);
+  });
+
+  it('"Send mail" opens the mail form addressed to the right-clicked user', async () => {
+    const body = await interact({
+      type: InteractionType.APPLICATION_COMMAND,
+      user: { id: 'me' },
+      data: {
+        name: commands.SEND_MAIL_MENU.name,
+        type: 2,
+        target_id: '42',
+        resolved: { users: { 42: { id: '42' } } },
+      },
+    });
+    expect(body.data.components[0].components[0].value).to.equal('42');
+  });
+
+  it('suggests the stats a user already has, filtered by what was typed', async () => {
+    const body = await interact(
+      {
+        type: InteractionType.APPLICATION_COMMAND_AUTOCOMPLETE,
+        user: { id: 'me' },
+        data: {
+          name: 'getstats',
+          options: [{ name: 'stat', value: 'WI', focused: true }],
+        },
+      },
+      envWith(new UserData(fakeCtx({ wins: 3, kills: 1, mailbox: [] }))),
+    );
+    expect(body.type).to.equal(
+      InteractionResponseType.APPLICATION_COMMAND_AUTOCOMPLETE_RESULT,
+    );
+    expect(body.data.choices).to.deep.equal([{ name: 'wins', value: 'wins' }]);
+  });
+});
+
+describe('mail replies', () => {
+  it('offers Reply only on mail that knows its sender', () => {
+    const withId = createSingleMailEmbed({ sender: 'a', senderId: '42', message: 'hi' }, 1);
+    expect(withId.data.components[0].components[0].custom_id).to.equal('mail_reply|42');
+
+    const old = createSingleMailEmbed({ sender: 'a', message: 'hi' }, 1);
+    expect(old.data.components).to.equal(undefined);
+  });
+
+  it('Reply opens the mail form addressed to the sender', async () => {
+    const body = await interact({
+      type: InteractionType.MESSAGE_COMPONENT,
+      user: { id: 'me' },
+      data: { custom_id: 'mail_reply|42' },
+    });
+    expect(body.type).to.equal(InteractionResponseType.MODAL);
+    expect(body.data.components[0].components[0].value).to.equal('42');
   });
 });

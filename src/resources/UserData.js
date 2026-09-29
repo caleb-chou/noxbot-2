@@ -1,8 +1,10 @@
 import { score_guess } from '../functions/lengthwave.js';
+import { MAX_REMINDERS, reminderMessage } from '../functions/remind.js';
+import { sendDM } from '../util.js';
 
 // Not stats: /get feeds the stats embed and must not leak these, and the
 // admin stat commands must not overwrite or delete them.
-const INTERNAL_KEYS = new Set(['mailbox', 'settings']);
+const INTERNAL_KEYS = new Set(['mailbox', 'settings', 'reminders']);
 const isInternal = (key) => INTERNAL_KEYS.has(key) || key.startsWith('chat:');
 
 const bad = (error) => Response.json({ error }, { status: 400 });
@@ -162,6 +164,37 @@ export class UserData {
       return Response.json(await this.scores());
     }
 
+    // Reminders fire from this DO's single alarm, always set to the earliest one.
+    if (pathname === '/addReminder' && request.method === 'POST') {
+      const reminder = await request.json();
+      const reminders = (await storage.get('reminders')) ?? [];
+      if (reminders.length >= MAX_REMINDERS) {
+        return bad(`You already have ${MAX_REMINDERS} reminders waiting.`);
+      }
+      reminders.push({ ...reminder, id: crypto.randomUUID() });
+      reminders.sort((a, b) => a.at - b.at);
+      await storage.put('reminders', reminders);
+      await storage.setAlarm(reminders[0].at);
+      return Response.json({ ok: true, pending: reminders.length });
+    }
+
+    if (pathname === '/getReminders') {
+      return Response.json((await storage.get('reminders')) ?? []);
+    }
+
+    // Returns what's left, so the caller can redraw the list.
+    if (pathname === '/cancelReminder' && request.method === 'POST') {
+      const { id } = await request.json();
+      const rest = ((await storage.get('reminders')) ?? []).filter((r) => r.id !== id);
+      await storage.put('reminders', rest);
+      if (rest.length) {
+        await storage.setAlarm(rest[0].at);
+      } else {
+        await storage.deleteAlarm();
+      }
+      return Response.json(rest);
+    }
+
     if (pathname === '/getChat') {
       const key = `chat:${searchParams.get('channelId')}`;
       return Response.json((await storage.get(key)) ?? {});
@@ -174,6 +207,23 @@ export class UserData {
     }
 
     return new Response('Not found', { status: 404 });
+  }
+
+  async alarm() {
+    const storage = this.state.storage;
+    const reminders = (await storage.get('reminders')) ?? [];
+    const now = Date.now();
+    const due = reminders.filter((r) => r.at <= now);
+    const rest = reminders.filter((r) => r.at > now);
+
+    // Saved before sending: a failed DM is dropped rather than re-sent on retry.
+    await storage.put('reminders', rest);
+    if (rest.length) {
+      await storage.setAlarm(rest[0].at);
+    }
+    for (const r of due) {
+      await sendDM(this.env, r.userId, reminderMessage(r));
+    }
   }
 
   /** { [userId]: { score, games } } for the lengthwave DO. */

@@ -112,6 +112,22 @@ export function createSingleMailEmbed(mail, index) {
             timestamp: mail.timestamp,
           },
         ],
+        // Mail sent before sender ids were stored can't be replied to.
+        components: mail.senderId
+          ? [
+              {
+                type: 1, // Action row
+                components: [
+                  {
+                    type: 2, // Button
+                    style: 1, // Primary
+                    label: 'Reply',
+                    custom_id: `mail_reply|${mail.senderId}`,
+                  },
+                ],
+              },
+            ]
+          : undefined,
         flags: InteractionResponseFlags.EPHEMERAL,
       },
     };
