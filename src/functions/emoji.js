@@ -1,3 +1,5 @@
+import { DISCORD_API } from '../util.js';
+
 const SEVENTV_API = 'https://7tv.io/v3/emotes';
 // Discord only accepts PNG/JPEG/GIF emoji, max 256 KiB.
 const DISCORD_MIME = { PNG: 'image/png', GIF: 'image/gif' };
@@ -35,7 +37,7 @@ export async function image_to_buffer(url) {
 }
 
 export async function add_emoji(token, guildId, name, image_data) {
-  return fetch(`https://discord.com/api/v10/guilds/${guildId}/emojis`, {
+  return fetch(`${DISCORD_API}/guilds/${guildId}/emojis`, {
     method: 'POST',
     headers: {
       Authorization: `Bot ${token}`,

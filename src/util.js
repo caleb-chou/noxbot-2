@@ -5,21 +5,27 @@ import {
 
 export const DISCORD_API = 'https://discord.com/api/v10';
 
-export class JsonResponse extends Response {
-  constructor(body, init) {
-    const jsonBody = JSON.stringify(body);
-    init = init || {
-      headers: {
-        'content-type': 'application/json;charset=UTF-8',
-      },
-    };
-    super(jsonBody, init);
-  }
-}
-
 /** Interactions from a DM have no `member`; guild interactions have no top-level `user`. */
 export function interactionUser(interaction) {
   return interaction.member?.user ?? interaction.user;
+}
+
+/** Value of a slash-command option, or undefined. */
+export const opt = (interaction, name) =>
+  interaction.data.options?.find((o) => o.name === name)?.value;
+
+export const avatarUrl = (user) =>
+  user?.avatar
+    ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png`
+    : undefined;
+
+/** Run `promise` after the response is sent; inline when there's no ctx (tests). */
+export async function background(ctx, promise) {
+  if (ctx?.waitUntil) {
+    ctx.waitUntil(promise);
+  } else {
+    await promise;
+  }
 }
 
 /**
@@ -46,26 +52,21 @@ export function editOriginalResponse(env, interaction, data) {
  * { embeds }); throwing surfaces the message to the user.
  */
 export async function deferred(env, ctx, interaction, work, ephemeral = false) {
-  const task = (async () => {
-    try {
-      return await editOriginalResponse(env, interaction, await work());
-    } catch (err) {
-      console.error('deferred work failed:', err);
-      return editOriginalResponse(env, interaction, {
-        content: `That didn't work: ${err.message}`,
-      });
-    }
-  })();
+  await background(
+    ctx,
+    (async () => {
+      try {
+        return await editOriginalResponse(env, interaction, await work());
+      } catch (err) {
+        console.error('deferred work failed:', err);
+        return editOriginalResponse(env, interaction, {
+          content: `That didn't work: ${err.message}`,
+        });
+      }
+    })(),
+  );
 
-  if (ctx?.waitUntil) {
-    ctx.waitUntil(task);
-  } else {
-    // No execution context (tests, or a caller that didn't forward one):
-    // finish inline so the work still happens.
-    await task;
-  }
-
-  return new JsonResponse({
+  return Response.json({
     type: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
     data: ephemeral ? { flags: InteractionResponseFlags.EPHEMERAL } : {},
   });
@@ -76,18 +77,15 @@ export async function deferred(env, ctx, interaction, work, ephemeral = false) {
  * interaction back to this worker, so they can read it without leaving the DM.
  */
 export async function sendMailNotification(recipientId, mail, env) {
-  const botToken = env.DISCORD_TOKEN; // you should store your bot token safely in environment variables
+  const headers = {
+    Authorization: `Bot ${env.DISCORD_TOKEN}`,
+    'Content-Type': 'application/json',
+  };
 
-  // Step 1: Create a DM channel
   const dmChannelRes = await fetch(`${DISCORD_API}/users/@me/channels`, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bot ${botToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      recipient_id: recipientId,
-    }),
+    headers,
+    body: JSON.stringify({ recipient_id: recipientId }),
   });
 
   if (!dmChannelRes.ok) {
@@ -97,13 +95,9 @@ export async function sendMailNotification(recipientId, mail, env) {
 
   const dmChannel = await dmChannelRes.json();
 
-  // Step 2: Send a message in that DM channel
   const messageRes = await fetch(`${DISCORD_API}/channels/${dmChannel.id}/messages`, {
     method: 'POST',
-    headers: {
-      'Authorization': `Bot ${botToken}`,
-      'Content-Type': 'application/json',
-    },
+    headers,
     body: JSON.stringify({
       embeds: [
         {
@@ -132,8 +126,5 @@ export async function sendMailNotification(recipientId, mail, env) {
 
   if (!messageRes.ok) {
     console.error('Failed to send DM message:', await messageRes.text());
-    return;
   }
-
-  console.log('Notification sent successfully.');
 }

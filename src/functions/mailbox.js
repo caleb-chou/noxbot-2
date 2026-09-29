@@ -1,3 +1,6 @@
+import { InteractionResponseType, InteractionResponseFlags } from 'discord-interactions';
+import { avatarUrl } from '../util.js';
+
 export function createMailboxModal(user) {
     return {
         type: 9, // InteractionResponseType.MODAL
@@ -56,8 +59,6 @@ export function createMailboxModal(user) {
     };
 }
 
-import { InteractionResponseType, InteractionResponseFlags } from 'discord-interactions';
-
 // Discord caps a field value at 1024 and a whole embed at 6000. Ten mails of
 // 400 leaves room for the names; /readmail shows the rest.
 const PREVIEW_CHARS = 400;
@@ -65,14 +66,11 @@ const PREVIEW_CHARS = 400;
 const truncate = (text, max) =>
     text.length > max ? `${text.slice(0, max - 1)}…` : text;
 
-// Export a function that builds the embed
 export function createMailboxEmbed(user, mailbox) {
     const embed = {
       author: {
         name: `${user.username}'s Mailbox 📬`,
-        icon_url: user.avatar 
-          ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png`
-          : undefined,
+        icon_url: avatarUrl(user),
       },
       color: 0x3498db, // Pretty blue
       timestamp: new Date().toISOString(),

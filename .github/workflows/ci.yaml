@@ -11,8 +11,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 18
-      - run: npm install
+          node-version: 22
+          cache: npm
+      - run: npm ci
       - run: npm test
   lint:
     runs-on: ubuntu-latest
@@ -20,8 +21,9 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 18
-      - run: npm install
+          node-version: 22
+          cache: npm
+      - run: npm ci
       - run: npm run lint
   release:
     if: github.ref == 'refs/heads/main'
@@ -31,9 +33,11 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 18
-      - run: npm install
+          node-version: 22
+          cache: npm
+      - run: npm ci
       - run: npm run publish
         env:
-          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          # Wrangler reads the CLOUDFLARE_* names; the secrets keep their old names.
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}

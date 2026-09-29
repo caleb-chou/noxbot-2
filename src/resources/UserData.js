@@ -1,6 +1,11 @@
-// Not stats: /get feeds the stats embed and must not leak these.
+import { score_guess } from '../functions/lengthwave.js';
+
+// Not stats: /get feeds the stats embed and must not leak these, and the
+// admin stat commands must not overwrite or delete them.
 const INTERNAL_KEYS = new Set(['mailbox', 'settings']);
 const isInternal = (key) => INTERNAL_KEYS.has(key) || key.startsWith('chat:');
+
+const bad = (error) => Response.json({ error }, { status: 400 });
 
 export class UserData {
   constructor(ctx, env) {
@@ -10,175 +15,119 @@ export class UserData {
 
   async fetch(request) {
     const { pathname, searchParams } = new URL(request.url);
+    const storage = this.state.storage;
 
     if (pathname === '/increment') {
       const data = await request.json();
-      if (!data.key) {
-        return new Response('Invalid data', { status: 400 });
+      if (!data.key || isInternal(data.key)) {
+        return bad('Invalid stat.');
       }
       const by = Number(data.by ?? 1);
       if (!Number.isFinite(by)) {
-        return new Response('Invalid data', { status: 400 });
+        return bad('Invalid amount.');
       }
-      const count = ((await this.state.storage.get(data.key)) || 0) + by;
-      await this.state.storage.put(data.key, count);
-      return new Response(JSON.stringify({ [data.key]: count }), {
-        headers: { 'Content-Type': 'application/json' },
-      });
+      const count = ((await storage.get(data.key)) || 0) + by;
+      await storage.put(data.key, count);
+      return Response.json({ [data.key]: count });
     }
 
     if (pathname === '/get') {
-      const allData = await this.state.storage.list();
-      const stats = Object.fromEntries(
-        [...allData].filter(([key]) => !isInternal(key)),
+      const allData = await storage.list();
+      return Response.json(
+        Object.fromEntries([...allData].filter(([key]) => !isInternal(key))),
       );
-      return new Response(JSON.stringify(stats), {
-        headers: { 'Content-Type': 'application/json' },
-      });
     }
 
     if (pathname === '/set') {
       const data = await request.json();
       const [key, value] = Object.entries(data)[0] ?? [];
-      if (!key || value === undefined) {
-        return new Response('Invalid data', { status: 400 });
+      if (!key || value === undefined || isInternal(key)) {
+        return bad('Invalid stat.');
       }
-      await this.state.storage.put(key, value);
-      return new Response(JSON.stringify({ [key]: value }), {
-        headers: { 'Content-Type': 'application/json' },
-      });
+      await storage.put(key, value);
+      return Response.json({ [key]: value });
     }
 
-    if (pathname === '/deleteAll') {
-      await this.state.storage.deleteAll();
-      return new Response(JSON.stringify({ deleted: 'everything >:)' }), {
-        headers: { 'Content-Type': 'application/json' },
-      });
+    // Stats only: mail, settings and chat tracking belong to the user.
+    if (pathname === '/dropStats') {
+      const keys = [...(await storage.list()).keys()].filter((k) => !isInternal(k));
+      if (keys.length) {
+        await storage.delete(keys);
+      }
+      return Response.json({ deleted: keys });
     }
 
     if (pathname === '/addToMailbox') {
       const mail = await request.json();
-      const mailbox = (await this.state.storage.get('mailbox')) || [];
+      const mailbox = (await storage.get('mailbox')) || [];
 
       if (mailbox.length >= 10) {
-        return new Response(
-          JSON.stringify({ error: 'Mailbox is full. Max 10 messages allowed.' }),
-          { status: 400, headers: { 'Content-Type': 'application/json' } }
-        );
+        return bad('Mailbox is full. Max 10 messages allowed.');
       }
       mailbox.push(mail);
-      await this.state.storage.put('mailbox', mailbox);
-      return new Response(JSON.stringify({ success: true, message: 'Mail Sent.' }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      await storage.put('mailbox', mailbox);
+      return Response.json({ success: true, message: 'Mail Sent.' });
     }
 
     if (pathname === '/getMailbox' && request.method === 'GET') {
-      const mailbox = (await this.state.storage.get('mailbox')) || [];
-
-      return new Response(JSON.stringify({ mailbox }), {
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return Response.json({ mailbox: (await storage.get('mailbox')) || [] });
     }
 
+    // No index clears the mailbox; otherwise a 1-based index deletes one mail.
     if (pathname === '/deleteMail' && request.method === 'POST') {
-      const data = await request.json();
-      const index = Number(data.index) - 1;
-      const mailbox = (await this.state.storage.get('mailbox')) || [];
+      const { index } = await request.json();
+      const mailbox = (await storage.get('mailbox')) || [];
 
-      if (Number.isNaN(index)) {
-        return new Response(JSON.stringify({ error: 'Invalid index.' }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
-        });
+      if (index === undefined || index === null) {
+        await storage.put('mailbox', []);
+        return Response.json({ success: true, message: 'Mailbox cleared.' });
       }
 
-      if (index < 0) {
-        // No index provided → clear mailbox
-        await this.state.storage.put('mailbox', []);
-        return new Response(JSON.stringify({ success: true, message: 'Mailbox cleared.' }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        });
+      const n = Number(index);
+      if (!Number.isInteger(n) || n < 1 || n > mailbox.length) {
+        return bad('Invalid or out of bounds index.');
       }
 
-      if (index >= mailbox.length) {
-        return new Response(JSON.stringify({ error: 'Invalid or out of bounds index.' }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
-
-      mailbox.splice(index, 1); // Remove the specific mail
-
-      await this.state.storage.put('mailbox', mailbox);
-
-      return new Response(JSON.stringify({ success: true, message: 'Mail deleted.' }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      mailbox.splice(n - 1, 1);
+      await storage.put('mailbox', mailbox);
+      return Response.json({ success: true, message: 'Mail deleted.' });
     }
 
     if (pathname === '/getSettings') {
-      const settings = (await this.state.storage.get('settings')) || {};
-      return new Response(JSON.stringify(settings), {
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return Response.json((await storage.get('settings')) || {});
     }
 
     if (pathname === '/updateSettings') {
-      const settings = (await this.state.storage.get('settings')) || {};
-      const data = await request.json();
-      const [key, value] = Object.entries(data)[0] ?? [];
+      const settings = (await storage.get('settings')) || {};
+      const [key, value] = Object.entries(await request.json())[0] ?? [];
       if (!key) {
-        return new Response('Invalid data', { status: 400 });
+        return bad('Invalid setting.');
       }
-
       settings[key] = value;
-
-      await this.state.storage.put('settings', settings);
-
-      return new Response(JSON.stringify(settings), {
-        headers: { 'Content-Type': 'application/json' },
-      });
+      await storage.put('settings', settings);
+      return Response.json(settings);
     }
 
     if (pathname === '/lengthwave' && request.method === 'POST') {
-      const data = await request.json();
-      // console.log(data)
-      const {gameId, game_data} = data;
-
-      await this.state.storage.put(gameId, game_data);
-
-      return new Response(JSON.stringify({ [gameId]: game_data }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      const { gameId, game_data } = await request.json();
+      await storage.put(gameId, game_data);
+      return Response.json({ [gameId]: game_data });
     }
 
     if (pathname === '/lengthwave' && request.method === 'GET') {
-      const gameId = searchParams.get('gameId');
-      const game_data = await this.state.storage.get(gameId);
-
+      const game_data = await storage.get(searchParams.get('gameId'));
       if (!game_data) {
-        return new Response(JSON.stringify({ error: 'Game not found' }), {
-          status: 404,
-          headers: { 'Content-Type': 'application/json' },
-        });
+        return Response.json({ error: 'Game not found' }, { status: 404 });
       }
-
-      return new Response(JSON.stringify(game_data), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return Response.json(game_data);
     }
 
-    // Claim a guess. The DO runs single-threaded, so the read-modify-write of
-    // the guessed list is atomic and nobody can score the same gamut twice.
+    // Claim a guess and bank its score in one step. The DO runs single-threaded,
+    // so nobody can score the same gamut twice, and the claim and the score
+    // can't drift apart.
     if (pathname === '/lengthwave/guess' && request.method === 'POST') {
-      const { gameId, userId } = await request.json();
-      const game_data = await this.state.storage.get(gameId);
+      const { gameId, userId, guess } = await request.json();
+      const game_data = await storage.get(gameId);
 
       if (!game_data) {
         return Response.json({ error: 'Game not found' }, { status: 404 });
@@ -186,44 +135,72 @@ export class UserData {
 
       const guessed = game_data.guessed ?? [];
       const already = guessed.includes(userId);
+      // The creator saw the position, so their own guess must never score.
+      const ownGamut = game_data.creator === userId;
+
       if (!already) {
         game_data.guessed = [...guessed, userId];
-        await this.state.storage.put(gameId, game_data);
+        await storage.put(gameId, game_data);
       }
 
-      return Response.json({ game_data, already });
-    }
-
-    // ponytail: one global roster, not per-guild. Split by guild if this bot
-    // ever lives in more than one server.
-    if (pathname === '/lengthwave/players' && request.method === 'POST') {
-      const { userId } = await request.json();
-      const players = (await this.state.storage.get('players')) ?? [];
-
-      if (!players.includes(userId)) {
-        await this.state.storage.put('players', [...players, userId]);
+      if (!already && !ownGamut) {
+        const scores = await this.scores();
+        const row = scores[userId] ?? { score: 0, games: 0 };
+        scores[userId] = {
+          score: row.score + score_guess(game_data, guess).score,
+          games: row.games + 1,
+        };
+        await storage.put('scores', scores);
       }
 
-      return Response.json({ ok: true });
+      return Response.json({ game_data, already, ownGamut });
     }
 
-    if (pathname === '/lengthwave/players') {
-      return Response.json({
-        players: (await this.state.storage.get('players')) ?? [],
-      });
+    // ponytail: one global scoreboard, not per-guild. Split by guild if this
+    // bot ever lives in more than one server.
+    if (pathname === '/lengthwave/scores') {
+      return Response.json(await this.scores());
     }
 
     if (pathname === '/getChat') {
       const key = `chat:${searchParams.get('channelId')}`;
-      return Response.json((await this.state.storage.get(key)) ?? {});
+      return Response.json((await storage.get(key)) ?? {});
     }
 
     if (pathname === '/setChat' && request.method === 'POST') {
       const key = `chat:${searchParams.get('channelId')}`;
-      await this.state.storage.put(key, await request.json());
+      await storage.put(key, await request.json());
       return Response.json({ ok: true });
     }
 
     return new Response('Not found', { status: 404 });
+  }
+
+  /** { [userId]: { score, games } } for the lengthwave DO. */
+  async scores() {
+    const scores = await this.state.storage.get('scores');
+    if (scores) {
+      return scores;
+    }
+
+    // ponytail: one-off migration from the old `players` roster, whose scores
+    // lived in each player's own DO. Delete once prod has a `scores` key.
+    const players = (await this.state.storage.get('players')) ?? [];
+    const migrated = Object.fromEntries(
+      await Promise.all(
+        players.map(async (id) => {
+          const ns = this.env.NOXBOT_DATA;
+          const stats = await (
+            await ns.get(ns.idFromName(id)).fetch('https://dummy/get')
+          ).json();
+          return [id, { score: stats.gamut_score ?? 0, games: stats.gamut_games ?? 0 }];
+        }),
+      ),
+    );
+    if (players.length) {
+      await this.state.storage.put('scores', migrated);
+      await this.state.storage.delete('players');
+    }
+    return migrated;
   }
 }

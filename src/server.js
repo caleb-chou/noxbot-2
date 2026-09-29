@@ -33,10 +33,12 @@ import {
 import { createCoolRole, assignRole } from './functions/coolrole.js';
 import { UserData } from './resources/UserData.js';
 import {
-  JsonResponse,
   sendMailNotification,
   interactionUser,
   deferred,
+  background,
+  opt,
+  avatarUrl,
   DISCORD_API,
 } from './util.js';
 import { coinFlip } from './functions/coinflip.js';
@@ -48,7 +50,6 @@ import {
   generate_guess_response_message_embed,
   generate_guesser_message_embed,
   generate_message_embed,
-  score_guess,
   PROMPTS,
 } from './functions/lengthwave.js';
 import {
@@ -69,35 +70,59 @@ const SNOWFLAKE = /^\d{17,20}$/;
 const ADMINISTRATOR = 8n;
 
 const ephemeralText = (content) =>
-  new JsonResponse({
+  Response.json({
     type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
     data: { content, flags: InteractionResponseFlags.EPHEMERAL },
+  });
+
+const reply = (data, ephemeral) =>
+  Response.json({
+    type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+    data: {
+      ...data,
+      flags: ephemeral ? InteractionResponseFlags.EPHEMERAL : undefined,
+    },
   });
 
 const userData = (env, name) =>
   env.NOXBOT_DATA.get(env.NOXBOT_DATA.idFromName(name));
 
+const post = (stub, path, body) =>
+  stub.fetch(`https://dummy${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+
 const isAdmin = (interaction) =>
   (BigInt(interaction.member?.permissions ?? 0) & ADMINISTRATOR) !== 0n;
+
+/** Value of a modal text input by its custom_id. */
+const modalValue = (interaction, id) =>
+  interaction.data.components
+    ?.flatMap((row) => row.components ?? [])
+    .find((c) => c.custom_id === id)?.value;
+
+const guildIdOf = (interaction) => interaction.guild_id ?? interaction.guild?.id;
+
+const randomCategory = () =>
+  ALL_PROMPTS[Math.floor(Math.random() * ALL_PROMPTS.length)];
 
 async function mailboxResponse(env, user) {
   const res = await userData(env, user.id).fetch('https://dummy/getMailbox');
   const { mailbox } = await res.json();
-  return new JsonResponse(createMailboxEmbed(user, mailbox));
+  return Response.json(createMailboxEmbed(user, mailbox));
 }
 
-/** Persist a gamut so the clue/guess modals can look its answer up later. */
-async function saveGamut(env, body, creatorId) {
-  await userData(env, 'lengthwave').fetch('https://dummy/lengthwave', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      gameId: body.data.embeds[0].footer.text,
-      // The creator saw the position, so their own guess must never score.
-      game_data: { ...body.data.game_data, creator: creatorId },
-    }),
+/** Create a gamut and persist it so the clue/guess modals can look it up later. */
+async function newGamut(env, prompts, position, creatorId) {
+  const { message, gameId, game_data } = generate_message_embed(prompts, position);
+  await post(userData(env, 'lengthwave'), '/lengthwave', {
+    gameId,
+    // The creator saw the position, so their own guess must never score.
+    game_data: { ...game_data, creator: creatorId },
   });
-  return body;
+  return Response.json(message);
 }
 
 /**
@@ -117,7 +142,6 @@ router.post('/', async (request, env, ctx) => {
     request,
     env,
   );
-  // console.log(env);
 
   if (!isValid || !interaction) {
     return new Response('Bad request signature.', { status: 401 });
@@ -126,24 +150,14 @@ router.post('/', async (request, env, ctx) => {
   if (interaction.type === InteractionType.PING) {
     // The `PING` message is used during the initial webhook handshake, and is
     // required to configure the webhook in the developer portal.
-    return new JsonResponse({
-      type: InteractionResponseType.PONG,
-    });
+    return Response.json({ type: InteractionResponseType.PONG });
   }
 
   if (interaction.type === InteractionType.MODAL_SUBMIT) {
-    if (interaction.data.custom_id === 'mailbox_modal') {
-      const recipient = interaction.data.components?.[0]?.components?.find(
-        (component) => component.custom_id === 'recipient_input'
-      )?.value;
+    const customId = interaction.data.custom_id;
 
-      const subject = interaction.data.components?.[1]?.components?.find(
-        (component) => component.custom_id === 'subject_input'
-      )?.value;
-
-      const message = interaction.data.components?.[2]?.components?.find(
-        (component) => component.custom_id === 'message_input'
-      )?.value;
+    if (customId === 'mailbox_modal') {
+      const recipient = modalValue(interaction, 'recipient_input');
 
       // Mailboxes are keyed by user id; a username would silently post into a
       // mailbox nobody ever reads.
@@ -155,42 +169,30 @@ router.post('/', async (request, env, ctx) => {
 
       const mail = {
         sender: interactionUser(interaction).username,
-        subject: subject,
-        message: message,
+        subject: modalValue(interaction, 'subject_input'),
+        message: modalValue(interaction, 'message_input'),
         timestamp: new Date().toISOString(),
       };
 
       const stub = userData(env, recipient);
-
-      const res = await stub.fetch('https://dummy/addToMailbox', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(mail),
-      });
+      const res = await post(stub, '/addToMailbox', mail);
       const response = await res.json();
 
       if (!res.ok) {
         return ephemeralText(response.error ?? 'Could not deliver that mail.');
       }
 
-      const settingsRes = await stub.fetch('https://dummy/getSettings');
-      const userSettings = await settingsRes.json();
-
+      const userSettings = await (await stub.fetch('https://dummy/getSettings')).json();
       if (userSettings.notifyForMail === 'true') {
-        await sendMailNotification(recipient, mail, env);
+        // Two Discord calls; don't spend the 3s interaction window on them.
+        await background(ctx, sendMailNotification(recipient, mail, env));
       }
 
       return ephemeralText(response.message);
     }
 
-    if (interaction.data.custom_id.startsWith('lengthwave_clue_modal')) {
-      const game_id = interaction.data.custom_id.split('|')[1];
-      const clue = interaction.data.components?.[0]?.components?.find(
-        (component) => component.custom_id === 'clue_input'
-      )?.value;
-
+    if (customId.startsWith('lengthwave_clue_modal')) {
+      const game_id = customId.split('|')[1];
       const res = await userData(env, 'lengthwave').fetch(
         `https://dummy/lengthwave?gameId=${game_id}`,
       );
@@ -198,66 +200,33 @@ router.post('/', async (request, env, ctx) => {
         return ephemeralText('That gamut is gone — start a new one with /lengthwave.');
       }
       const game_data = await res.json();
-      game_data.clue = clue;
+      game_data.clue = modalValue(interaction, 'clue_input');
 
-      return new JsonResponse(
+      return Response.json(
         generate_guesser_message_embed(game_id, game_data, interactionUser(interaction)),
       );
     }
 
-    if (interaction.data.custom_id.startsWith('lengthwave_guess_modal')) {
-      const game_id = interaction.data.custom_id.split('|')[1];
-      const guess_value = interaction.data.components?.[0]?.components?.find(
-        (component) => component.custom_id === 'guess_input'
-      )?.value;
-
-      const guess = parseFloat(guess_value);
+    if (customId.startsWith('lengthwave_guess_modal')) {
+      const game_id = customId.split('|')[1];
+      const guess = parseFloat(modalValue(interaction, 'guess_input'));
       if (Number.isNaN(guess) || guess < 0 || guess > 1) {
         return ephemeralText('Your guess must be a number between 0 and 1.');
       }
 
       const user = interactionUser(interaction);
-      const res = await userData(env, 'lengthwave').fetch(
-        'https://dummy/lengthwave/guess',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ gameId: game_id, userId: user.id }),
-        },
-      );
+      const res = await post(userData(env, 'lengthwave'), '/lengthwave/guess', {
+        gameId: game_id,
+        userId: user.id,
+        guess,
+      });
       if (!res.ok) {
         return ephemeralText('That gamut is gone — start a new one with /lengthwave.');
       }
-      const { game_data, already } = await res.json();
+      // In a 1:1 DM you can see your own gamut, so the DO refuses to score it.
+      const { game_data, already, ownGamut } = await res.json();
 
-      // In a 1:1 DM you can see your own gamut, so without this the
-      // leaderboard is farmable in private.
-      const ownGamut = game_data.creator === user.id;
-
-      if (!already && !ownGamut) {
-        const { score } = score_guess(game_data, guess);
-        const stub = userData(env, user.id);
-        await stub.fetch('https://dummy/increment', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ key: 'gamut_score', by: score }),
-        });
-        await stub.fetch('https://dummy/increment', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ key: 'gamut_games', by: 1 }),
-        });
-        await userData(env, 'lengthwave').fetch(
-          'https://dummy/lengthwave/players',
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ userId: user.id }),
-          },
-        );
-      }
-
-      return new JsonResponse(
+      return Response.json(
         generate_guess_response_message_embed(
           game_id,
           game_data,
@@ -274,7 +243,6 @@ router.post('/', async (request, env, ctx) => {
   }
 
   if (interaction.type === InteractionType.MESSAGE_COMPONENT) {
-
     const customId = interaction.data.custom_id;
 
     if (customId === 'check_mailbox') {
@@ -283,357 +251,186 @@ router.post('/', async (request, env, ctx) => {
 
     if (customId === 'gamut_clue_button') {
       const game_id = interaction.message.embeds[0].footer.text;
-      return new JsonResponse(createLengthWaveClueModal(game_id));
+      return Response.json(createLengthWaveClueModal(game_id));
     }
 
     if (customId === 'new_gamut_button') {
-      const prompts = ALL_PROMPTS[Math.floor(Math.random() * ALL_PROMPTS.length)];
-      return new JsonResponse(
-        await saveGamut(
-          env,
-          generate_message_embed(prompts),
-          interactionUser(interaction).id,
-        ),
-      );
+      return newGamut(env, randomCategory(), undefined, interactionUser(interaction).id);
     }
 
     if (customId.startsWith('gamut_guess_button')) {
-      const game_id = interaction.data.custom_id.split('|')[1];
-      return new JsonResponse(createLengthWaveGuessModal(game_id));
+      return Response.json(createLengthWaveGuessModal(customId.split('|')[1]));
     }
   }
 
   if (interaction.type === InteractionType.APPLICATION_COMMAND) {
     // Most user commands will come as `APPLICATION_COMMAND`.
-    switch (interaction.data.name.toLowerCase()) {
-      case INVITE_COMMAND.name.toLowerCase(): {
-        const applicationId = env.DISCORD_APPLICATION_ID;
-        const INVITE_URL = `https://discord.com/oauth2/authorize?client_id=${applicationId}&scope=applications.commands`;
-        return new JsonResponse({
-          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-          data: {
-            content: INVITE_URL,
-            flags: InteractionResponseFlags.EPHEMERAL,
-          },
-        });
+    const ephemeral = opt(interaction, 'ephemeral');
+
+    switch (interaction.data.name) {
+      case INVITE_COMMAND.name: {
+        return ephemeralText(
+          `https://discord.com/oauth2/authorize?client_id=${env.DISCORD_APPLICATION_ID}&scope=applications.commands`,
+        );
       }
 
-      case INCREMENT_STATS_COMMAND.name.toLowerCase(): {
+      case INCREMENT_STATS_COMMAND.name: {
         if (!isAdmin(interaction)) {
           return ephemeralText("You don't have permission to use this command.");
         }
-        const user = interaction.data.options?.find(
-          (option) => option.name === 'user',
-        )?.value;
-        const stat = interaction.data.options?.find(
-          (option) => option.name === 'stat',
-        )?.value;
-        const ephemeral = interaction.data.options?.find(
-          (option) => option.name === 'ephemeral',
-        )?.value;
-
+        const user = opt(interaction, 'user');
+        const stat = opt(interaction, 'stat');
         if (!stat) {
           return ephemeralText('Tell me which stat to increment.');
         }
 
-        const username = interaction.data.resolved?.users?.[user]?.username;
-
-        const res = await userData(env, user).fetch('https://dummy/increment', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ key: stat }),
-        });
+        const res = await post(userData(env, user), '/increment', { key: stat });
         const data = await res.json();
-
-        const body = {
-          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-          data: {
-            content: `Incremented stat ${stat} to ${data[stat]} for user ${username}.`,
-          },
-        };
-        if (ephemeral) {
-          body.data.flags = InteractionResponseFlags.EPHEMERAL;
+        if (!res.ok) {
+          return ephemeralText(data.error);
         }
-        return new JsonResponse(body);
+
+        const username = interaction.data.resolved?.users?.[user]?.username;
+        return reply(
+          { content: `Incremented stat ${stat} to ${data[stat]} for user ${username}.` },
+          ephemeral,
+        );
       }
 
-      case GET_STATS_COMMAND.name.toLowerCase(): {
+      case GET_STATS_COMMAND.name: {
         const self = interactionUser(interaction);
-        const userId =
-          interaction.data.options?.find((option) => option.name === 'user')
-            ?.value ?? self.id;
+        const userId = opt(interaction, 'user') ?? self.id;
+        const stat = opt(interaction, 'stat');
 
-        const stat = interaction.data.options?.find(
-          (option) => option.name === 'stat',
-        )?.value;
-
-        const ephemeral = interaction.data.options?.find(
-          (option) => option.name === 'ephemeral',
-        )?.value;
-
-        const res = await userData(env, userId).fetch('https://dummy/get');
-        const data = await res.json();
-
+        const data = await (await userData(env, userId).fetch('https://dummy/get')).json();
         const resolvedUser = interaction.data.resolved?.users?.[userId] ?? self;
 
-        const username = resolvedUser?.username;
-        const avatar = resolvedUser?.avatar;
-
-        const avatarUrl = avatar
-          ? `https://cdn.discordapp.com/avatars/${userId}/${avatar}.png`
-          : `https://cdn.discordapp.com/embed/avatars/0.png`;
-
-        // Basic embed setup
         const embed = {
           type: 'rich',
           author: {
-            name: `Stats for ${username}`,
-            icon_url: avatarUrl,
+            name: `Stats for ${resolvedUser?.username}`,
+            icon_url:
+              avatarUrl(resolvedUser) ?? 'https://cdn.discordapp.com/embed/avatars/0.png',
           },
           color: 0x5865f2, // blurple
           fields: [],
         };
 
         if (stat) {
-          embed.fields.push({
-            name: stat,
-            value: `${data[stat] ?? '0'}`,
-            inline: true,
-          });
+          embed.fields.push({ name: stat, value: `${data[stat] ?? '0'}`, inline: true });
         } else {
           // Discord rejects embeds with more than 25 fields.
           for (const [key, value] of Object.entries(data).slice(0, 25)) {
-            embed.fields.push({
-              name: key,
-              value: `${value}`,
-              inline: true,
-            });
+            embed.fields.push({ name: key, value: `${value}`, inline: true });
           }
-
           if (embed.fields.length === 0) {
             embed.description = 'No stats found for this user.';
           }
         }
 
-        const body = {
-          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-          data: {
-            embeds: [embed],
-          },
-        };
-
-        if (ephemeral) {
-          body.data.flags = InteractionResponseFlags.EPHEMERAL;
-        }
-
-        return new JsonResponse(body);
+        return reply({ embeds: [embed] }, ephemeral);
       }
 
-      case UPDATE_STATS_COMMAND.name.toLowerCase(): {
+      case UPDATE_STATS_COMMAND.name: {
         if (!isAdmin(interaction)) {
           return ephemeralText("You don't have permission to use this command.");
         }
+        const user = opt(interaction, 'user');
+        const stat = opt(interaction, 'stat');
 
-        const user = interaction.data.options?.find(
-          (option) => option.name === 'user',
-        )?.value;
-        const stat = interaction.data.options?.find(
-          (option) => option.name === 'stat',
-        )?.value;
-        const value = interaction.data.options?.find(
-          (option) => option.name === 'value',
-        )?.value;
-        const ephemeral = interaction.data.options?.find(
-          (option) => option.name === 'ephemeral',
-        )?.value;
-
-        const username = interaction.data.resolved?.users?.[user]?.username;
-
-        const res = await userData(env, user).fetch('https://dummy/set', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ [stat]: value }),
+        const res = await post(userData(env, user), '/set', {
+          [stat]: opt(interaction, 'value'),
         });
         const data = await res.json();
-
-        let body = {
-          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-          data: {
-            content: `Set stat ${stat} to ${data[stat]} for user ${username}.`,
-          },
-        };
-
-        if (ephemeral) {
-          body.data.flags = InteractionResponseFlags.EPHEMERAL;
+        if (!res.ok) {
+          return ephemeralText(data.error);
         }
 
-        return new JsonResponse(body);
+        const username = interaction.data.resolved?.users?.[user]?.username;
+        return reply(
+          { content: `Set stat ${stat} to ${data[stat]} for user ${username}.` },
+          ephemeral,
+        );
       }
 
-      case DROP_STATS_COMMAND.name.toLowerCase(): {
+      case DROP_STATS_COMMAND.name: {
         if (!isAdmin(interaction)) {
           return ephemeralText("You don't have permission to use this command.");
         }
-        const user = interaction.data.options?.find(
-          (option) => option.name === 'user',
-        )?.value;
-        const ephemeral = interaction.data.options?.find(
-          (option) => option.name === 'ephemeral',
-        )?.value;
-        await userData(env, user).fetch('https://dummy/deleteAll', {
-          method: 'POST',
-        });
-        const body = {
-          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
-          data: {
-            content: `All stats for user ${user} have been deleted.`,
-          },
-        };
-        if (ephemeral) {
-          body.data.flags = InteractionResponseFlags.EPHEMERAL;
-        }
-        return new JsonResponse(body);
+        const user = opt(interaction, 'user');
+        await post(userData(env, user), '/dropStats', {});
+        return reply({ content: `All stats for user ${user} have been deleted.` }, ephemeral);
       }
 
-      case EIGHTBALL_COMMAND.name.toLowerCase(): {
-        const question = interaction.data.options?.find(
-          (option) => option.name === 'question',
-        )?.value;
-        const ephemeral = interaction.data.options?.find(
-          (option) => option.name === 'ephemeral',
-        )?.value;
-        return eightBall(question, interaction, ephemeral);
-      }
+      case EIGHTBALL_COMMAND.name:
+        return eightBall(opt(interaction, 'question'), interaction, ephemeral);
 
-      case COINFLIP_COMMAND.name.toLowerCase(): {
-        const ephemeral = interaction.data.options?.find(
-          (option) => option.name === 'ephemeral',
-        )?.value;
+      case COINFLIP_COMMAND.name:
         return coinFlip(interaction, ephemeral);
+
+      case SEND_MAIL_COMMAND.name: {
+        const resolvedUser = interaction.data.resolved?.users?.[opt(interaction, 'user')];
+        return Response.json(createMailboxModal(resolvedUser));
       }
 
-      case SEND_MAIL_COMMAND.name.toLowerCase(): {
-        const user = interaction.data.options?.find(
-          (option) => option.name === 'user',
-        )?.value;
-
-        const resolvedUser = interaction.data.resolved?.users?.[user];
-
-        return new JsonResponse(createMailboxModal(resolvedUser))
-      }
-
-      case CHECK_MAILBOX_COMMAND.name.toLowerCase(): {
+      case CHECK_MAILBOX_COMMAND.name:
         return mailboxResponse(env, interactionUser(interaction));
-      }
 
-      case DELETE_MAIL_COMMAND.name.toLowerCase(): {
-        const index = interaction.data.options?.find(
-          (option) => option.name === 'index',
-        )?.value;
-
+      case DELETE_MAIL_COMMAND.name: {
         const user = interactionUser(interaction);
-        const res = await userData(env, user.id).fetch('https://dummy/deleteMail', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ index: index ?? -1 }),
+        const res = await post(userData(env, user.id), '/deleteMail', {
+          index: opt(interaction, 'index'),
         });
-
         const response = await res.json();
-
         return ephemeralText(response.message ?? response.error);
       }
 
-      case GET_SETTINGS_COMMAND.name.toLowerCase(): {
+      case GET_SETTINGS_COMMAND.name: {
         const user = interactionUser(interaction);
         const res = await userData(env, user.id).fetch('https://dummy/getSettings');
-        const settings = await res.json();
-
-        return ephemeralText(JSON.stringify(settings));
+        return ephemeralText(JSON.stringify(await res.json()));
       }
 
-      case UPDATE_SETTINGS_COMMAND.name.toLowerCase(): {
-        const setting = interaction.data.options?.find(
-          (option) => option.name === 'setting',
-        )?.value;
-        const value = interaction.data.options?.find(
-          (option) => option.name === 'value',
-        )?.value;
-
+      case UPDATE_SETTINGS_COMMAND.name: {
+        const setting = opt(interaction, 'setting');
+        const value = opt(interaction, 'value');
         const user = interactionUser(interaction);
-        await userData(env, user.id).fetch('https://dummy/updateSettings', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ [setting]: value }),
-        });
-
+        await post(userData(env, user.id), '/updateSettings', { [setting]: value });
         return ephemeralText(`Updated the ${setting} value to ${value}`);
       }
 
-      case LENGTHWAVE_COMMAND.name.toLowerCase(): {
-        const prompts_category = interaction.data.options?.find(
-          (option) => option.name === 'category',
-        )?.value;
-
-        const left = interaction.data.options?.find(
-          (option) => option.name === 'left',
-        )?.value;
-
-        const right = interaction.data.options?.find(
-          (option) => option.name === 'right',
-        )?.value;
-
-        const position_raw = interaction.data.options?.find(
-          (option) => option.name === 'position',
-        )?.value;
-
-        const position = position_raw ? parseFloat(position_raw) : Math.random();
-        if (Number.isNaN(position) || position < 0 || position > 1) {
-          return ephemeralText('Position must be a number between 0 and 1');
-        }
+      case LENGTHWAVE_COMMAND.name: {
+        const category = opt(interaction, 'category');
+        const left = opt(interaction, 'left');
+        const right = opt(interaction, 'right');
 
         if (!left !== !right) {
           return ephemeralText('Please provide a left and right prompt');
         }
 
-        if (prompts_category && !Object.hasOwn(PROMPTS, prompts_category)) {
+        if (category && !Object.hasOwn(PROMPTS, category)) {
           return ephemeralText(
             `Unknown category. Pick one of: ${Object.keys(PROMPTS).join(', ')}`,
           );
         }
 
         const prompts =
-          left && right
-            ? [[left, right]]
-            : (PROMPTS[prompts_category] ??
-              ALL_PROMPTS[Math.floor(Math.random() * ALL_PROMPTS.length)]);
+          left && right ? [[left, right]] : (PROMPTS[category] ?? randomCategory());
 
-        return new JsonResponse(
-          await saveGamut(
-            env,
-            generate_message_embed(prompts, position),
-            interactionUser(interaction).id,
-          ),
+        // Discord validates `position` (NUMBER, 0..1); undefined means random.
+        return newGamut(
+          env,
+          prompts,
+          opt(interaction, 'position'),
+          interactionUser(interaction).id,
         );
       }
 
-      case EMOTE_COMMAND.name.toLowerCase(): {
-        const emoteUrl = interaction.data.options?.find(
-          (option) => option.name === 'url',
-        )?.value;
+      case EMOTE_COMMAND.name: {
+        const emoteUrl = opt(interaction, 'url');
+        const emoteName = opt(interaction, 'emote');
 
-        const emoteName = interaction.data.options?.find(
-          (option) => option.name === 'emote',
-        )?.value;
-
-        const guildId = interaction.guild_id ?? interaction.guild?.id;
+        const guildId = guildIdOf(interaction);
         if (!guildId) {
           return ephemeralText('Run /emote inside a server.');
         }
@@ -663,11 +460,8 @@ router.post('/', async (request, env, ctx) => {
         );
       }
 
-      case READ_MAIL_COMMAND.name.toLowerCase(): {
-        const index = interaction.data.options?.find(
-          (option) => option.name === 'index',
-        )?.value;
-
+      case READ_MAIL_COMMAND.name: {
+        const index = opt(interaction, 'index');
         const user = interactionUser(interaction);
         const res = await userData(env, user.id).fetch('https://dummy/getMailbox');
         const { mailbox } = await res.json();
@@ -681,58 +475,45 @@ router.post('/', async (request, env, ctx) => {
           );
         }
 
-        return new JsonResponse(createSingleMailEmbed(mail, index));
+        return Response.json(createSingleMailEmbed(mail, index));
       }
 
-      case LEADERBOARD_COMMAND.name.toLowerCase(): {
+      case LEADERBOARD_COMMAND.name: {
+        // Deferred: the first call after deploy migrates the old roster.
         return deferred(env, ctx, interaction, async () => {
-          const { players } = await (
-            await userData(env, 'lengthwave').fetch(
-              'https://dummy/lengthwave/players',
-            )
+          const scores = await (
+            await userData(env, 'lengthwave').fetch('https://dummy/lengthwave/scores')
           ).json();
 
-          if (players.length === 0) {
+          const rows = Object.entries(scores)
+            .map(([id, s]) => ({ id, ...s }))
+            .sort((a, b) => b.score - a.score);
+
+          if (rows.length === 0) {
             return { content: 'Nobody has guessed a gamut yet. `/lengthwave`!' };
           }
 
-          // Only people who have actually played, so this stays small.
-          const rows = await Promise.all(
-            players.map(async (id) => {
-              const stats = await (
-                await userData(env, id).fetch('https://dummy/get')
-              ).json();
-              return {
-                id,
-                score: stats.gamut_score ?? 0,
-                games: stats.gamut_games ?? 0,
-              };
-            }),
-          );
-
-          rows.sort((a, b) => b.score - a.score);
-
           return {
             embeds: [
-              {
-                title: '🧠 Gamut leaderboard',
-                description: rows
-                  .slice(0, 10)
-                  .map(
-                    (r, i) =>
-                      `${i + 1}. <@${r.id}> — **${r.score}** over ${r.games} guess${r.games === 1 ? '' : 'es'}`,
-                  )
-                  .join('\n'),
-                color: 0x5865f2,
-              },
-            ],
-            allowed_mentions: { parse: [] },
+            {
+              title: '🧠 Gamut leaderboard',
+              description: rows
+                .slice(0, 10)
+                .map(
+                  (r, i) =>
+                    `${i + 1}. <@${r.id}> — **${r.score}** over ${r.games} guess${r.games === 1 ? '' : 'es'}`,
+                )
+                .join('\n'),
+              color: 0x5865f2,
+            },
+          ],
+          allowed_mentions: { parse: [] },
           };
         });
       }
 
-      case PICK_RANDOM_USER_COMMAND.name.toLowerCase(): {
-        const guildId = interaction.guild_id ?? interaction.guild?.id;
+      case PICK_RANDOM_USER_COMMAND.name: {
+        const guildId = guildIdOf(interaction);
         if (!guildId) {
           return ephemeralText('Run /choosesomeone inside a server.');
         }
@@ -756,22 +537,18 @@ router.post('/', async (request, env, ctx) => {
 
           const picked = members[Math.floor(Math.random() * members.length)];
           return {
-            content: `\uD83C\uDFB2 I choose <@${picked.user.id}>!`,
+            content: `🎲 I choose <@${picked.user.id}>!`,
             // Render the mention without actually pinging them.
             allowed_mentions: { parse: [] },
           };
         });
       }
 
-      case CHAT_TRACK_COMMAND.name.toLowerCase(): {
-        const target = interaction.data.options?.find(
-          (option) => option.name === 'user',
-        )?.value;
+      case CHAT_TRACK_COMMAND.name: {
+        const target = opt(interaction, 'user');
         const self = interactionUser(interaction);
         const userId = target ?? self.id;
-        const user = target
-          ? interaction.data.resolved?.users?.[target]
-          : self;
+        const user = target ? interaction.data.resolved?.users?.[target] : self;
         const channelId = interaction.channel_id;
 
         if (!channelId) {
@@ -784,12 +561,7 @@ router.post('/', async (request, env, ctx) => {
             await stub.fetch(`https://dummy/getChat?channelId=${channelId}`)
           ).json();
 
-          const save = (data) =>
-            stub.fetch(`https://dummy/setChat?channelId=${channelId}`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(data),
-            });
+          const save = (data) => post(stub, `/setChat?channelId=${channelId}`, data);
 
           // First run: mark where to start. Backfilling a whole channel is
           // tens of thousands of rate-limited requests, so we count forward.
@@ -804,7 +576,7 @@ router.post('/', async (request, env, ctx) => {
             };
           }
 
-          const updated = await getStatsOnUser(
+          const { chatData: updated, caughtUp } = await getStatsOnUser(
             channelId,
             userId,
             chatData,
@@ -812,13 +584,18 @@ router.post('/', async (request, env, ctx) => {
           );
           await save(updated);
 
-          return createChatStatsEmbed(user ?? { username: 'that user' }, updated);
+          return {
+            ...createChatStatsEmbed(user ?? { username: 'that user' }, updated),
+            content: caughtUp
+              ? undefined
+              : 'Still catching up on this channel — run `/chattrack` again to count more.',
+          };
         });
       }
 
-      case TEST_COMMAND.name.toLowerCase(): {
+      case TEST_COMMAND.name: {
         const user = interactionUser(interaction);
-        const guildId = interaction.guild_id ?? interaction.guild?.id;
+        const guildId = guildIdOf(interaction);
 
         if (!guildId || user?.id !== env.COOL_GUY) {
           return ephemeralText('You are not the cool guy!');
@@ -844,12 +621,12 @@ router.post('/', async (request, env, ctx) => {
       }
 
       default:
-        return new JsonResponse({ error: 'Unknown Type' }, { status: 400 });
+        return Response.json({ error: 'Unknown Type' }, { status: 400 });
     }
   }
 
   console.error('Unknown Type');
-  return new JsonResponse({ error: 'Unknown Type' }, { status: 400 });
+  return Response.json({ error: 'Unknown Type' }, { status: 400 });
 });
 router.all('*', () => new Response('Not Found.', { status: 404 }));
 

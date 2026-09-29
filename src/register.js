@@ -1,25 +1,5 @@
-import {
-  CHECK_MAILBOX_COMMAND,
-  COINFLIP_COMMAND,
-  DELETE_MAIL_COMMAND,
-  DROP_STATS_COMMAND,
-  EIGHTBALL_COMMAND,
-  GET_STATS_COMMAND,
-  INCREMENT_STATS_COMMAND,
-  INVITE_COMMAND,
-  PICK_RANDOM_USER_COMMAND,
-  READ_MAIL_COMMAND,
-  LEADERBOARD_COMMAND,
-  CHAT_TRACK_COMMAND,
-  SEND_MAIL_COMMAND,
-  TEST_COMMAND,
-  UPDATE_STATS_COMMAND,
-  UPDATE_SETTINGS_COMMAND,
-  GET_SETTINGS_COMMAND,
-  LENGTHWAVE_COMMAND,
-  EMOTE_COMMAND,
-} from './commands.js';
-import dotenv from 'dotenv';
+import * as commands from './commands.js';
+import { DISCORD_API } from './util.js';
 import process from 'node:process';
 
 /**
@@ -28,7 +8,11 @@ import process from 'node:process';
  * to be run once.
  */
 
-dotenv.config({ path: '.dev.vars' });
+try {
+  process.loadEnvFile('.dev.vars');
+} catch {
+  // No file: fall back to whatever is already in the environment.
+}
 
 const token = process.env.DISCORD_TOKEN;
 const applicationId = process.env.DISCORD_APPLICATION_ID;
@@ -43,10 +27,10 @@ if (!applicationId) {
 }
 
 /**
- * Register all commands globally.  This can take o(minutes), so wait until
- * you're sure these are the commands you want.
+ * Register every command exported from commands.js globally.  This can take
+ * o(minutes), so wait until you're sure these are the commands you want.
  */
-const url = `https://discord.com/api/v10/applications/${applicationId}/commands`;
+const url = `${DISCORD_API}/applications/${applicationId}/commands`;
 
 const response = await fetch(url, {
   headers: {
@@ -54,27 +38,7 @@ const response = await fetch(url, {
     Authorization: `Bot ${token}`,
   },
   method: 'PUT',
-  body: JSON.stringify([
-    INVITE_COMMAND,
-    TEST_COMMAND,
-    COINFLIP_COMMAND,
-    EIGHTBALL_COMMAND,
-    GET_STATS_COMMAND,
-    INCREMENT_STATS_COMMAND,
-    UPDATE_STATS_COMMAND,
-    DROP_STATS_COMMAND,
-    CHECK_MAILBOX_COMMAND,
-    SEND_MAIL_COMMAND,
-    DELETE_MAIL_COMMAND,
-    READ_MAIL_COMMAND,
-    PICK_RANDOM_USER_COMMAND,
-    CHAT_TRACK_COMMAND,
-    LEADERBOARD_COMMAND,
-    UPDATE_SETTINGS_COMMAND,
-    GET_SETTINGS_COMMAND,
-    LENGTHWAVE_COMMAND,
-    EMOTE_COMMAND,
-  ]),
+  body: JSON.stringify(Object.values(commands)),
 });
 
 if (response.ok) {
