@@ -29,6 +29,10 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     needs: [test, lint]
+    # Job-level so the steps below can test for them: `secrets` isn't allowed in `if:`.
+    env:
+      DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+      DISCORD_APPLICATION_ID: ${{ secrets.DISCORD_APPLICATION_ID }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -36,11 +40,12 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
-      # Fails the job (and skips the deploy) if Discord rejects the commands.
-      - run: npm run register
-        env:
-          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
-          DISCORD_APPLICATION_ID: ${{ secrets.DISCORD_APPLICATION_ID }}
+      # Skipped when the Discord secrets aren't set. When they are, a rejected
+      # registration fails the job and skips the deploy.
+      - if: env.DISCORD_TOKEN != '' && env.DISCORD_APPLICATION_ID != ''
+        run: npm run register
+      - if: env.DISCORD_TOKEN == '' || env.DISCORD_APPLICATION_ID == ''
+        run: echo "::warning::DISCORD_TOKEN or DISCORD_APPLICATION_ID secret not set; skipped command registration."
       - run: npm run publish
         env:
           # Wrangler reads the CLOUDFLARE_* names; the secrets keep their old names.
