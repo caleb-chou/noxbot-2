@@ -17,6 +17,11 @@ const ANYWHERE = {
   contexts: [0, 1, 2],
 };
 
+// Hidden from everyone without this permission unless a server overrides it.
+// The admin commands still check at runtime, since overrides can widen access.
+const ADMIN_ONLY = { default_member_permissions: String(1 << 3) }; // ADMINISTRATOR
+const EXPRESSION_MANAGERS = { default_member_permissions: String(1 << 30) }; // MANAGE_GUILD_EXPRESSIONS
+
 export const INVITE_COMMAND = {
   ...ANYWHERE,
   name: 'invite',
@@ -31,8 +36,9 @@ export const TEST_COMMAND = {
 
 export const INCREMENT_STATS_COMMAND = {
   ...GUILD_ONLY,
+  ...ADMIN_ONLY,
   name: 'incrementuserdata',
-  description: 'Fetches data for user',
+  description: 'Add one to a stat for a user',
   options: [
     {
       name: 'user',
@@ -50,7 +56,7 @@ export const INCREMENT_STATS_COMMAND = {
       name: 'stat',
       description: 'The stat to increment',
       type: 3, // STRING
-      required: false,
+      required: true,
     }
   ]
 };
@@ -117,6 +123,7 @@ export const GET_STATS_COMMAND = {
 
 export const UPDATE_STATS_COMMAND = {
   ...GUILD_ONLY,
+  ...ADMIN_ONLY,
   name: 'updatestats',
   description: 'Update stats for a user',
   options: [
@@ -149,6 +156,7 @@ export const UPDATE_STATS_COMMAND = {
 
 export const DROP_STATS_COMMAND = {
   ...GUILD_ONLY,
+  ...ADMIN_ONLY,
   name: 'dropstats',
   description: 'Drop stats for a user',
   options: [
@@ -194,9 +202,10 @@ export const DELETE_MAIL_COMMAND = {
   options: [
     {
       name: 'index',
-      description: 'Which mail to delete',
+      description: 'Which mail to delete (leave empty to clear all)',
       type: 4,
-      required: false
+      required: false,
+      min_value: 1,
     }
   ]
 }
@@ -216,7 +225,8 @@ export const READ_MAIL_COMMAND = {
       name: 'index',
       description: 'Which mail to read',
       type: 4,
-      required: true
+      required: true,
+      min_value: 1,
     }
   ]
 }
@@ -283,14 +293,17 @@ export const LENGTHWAVE_COMMAND = {
     {
       name: 'position',
       description: 'Value between 0 and 1',
-      type: 3,
-      required: false
+      type: 10, // NUMBER
+      required: false,
+      min_value: 0,
+      max_value: 1,
     }
   ]
 }
 
 export const EMOTE_COMMAND = {
   ...GUILD_ONLY,
+  ...EXPRESSION_MANAGERS,
   name: 'emote',
   description: 'borrow an emote from 7tv',
   options: [

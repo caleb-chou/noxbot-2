@@ -11,7 +11,10 @@ import {
 } from '../src/functions/lengthwave.js';
 import { UserData } from '../src/resources/UserData.js';
 import { createMailboxEmbed } from '../src/functions/mailbox.js';
-import { createChatStatsEmbed } from '../src/functions/chattrack.js';
+import {
+  createChatStatsEmbed,
+  getStatsOnUser,
+} from '../src/functions/chattrack.js';
 import { deferred, sendMailNotification } from '../src/util.js';
 import * as commands from '../src/commands.js';
 import server from '../src/server.js';
@@ -25,7 +28,7 @@ function fakeCtx(initial = {}) {
       get: async (k) => map.get(k),
       put: async (k, v) => void map.set(k, v),
       list: async () => new Map(map),
-      deleteAll: async () => map.clear(),
+      delete: async (k) => [k].flat().forEach((key) => map.delete(key)),
     },
   };
 }
@@ -56,27 +59,31 @@ describe('lengthwave', () => {
   });
 
   it('will not score the gamut creator, who already saw the answer', async () => {
-    const game_data = {
-      position: 0.5,
-      prompt: { left: 'a', right: 'b' },
-      creator: 'u1',
-    };
-    const ctx = fakeCtx({ g1: game_data });
+    const ctx = fakeCtx({
+      g1: { position: 0.5, prompt: { left: 'a', right: 'b' }, creator: 'u1' },
+    });
     const obj = new UserData(ctx);
 
-    // The DO still hands back the game; the worker is what refuses to bank it.
-    const res = await post(obj, '/lengthwave/guess', { gameId: 'g1', userId: 'u1' });
-    const { game_data: got } = await res.json();
-    expect(got.creator).to.equal('u1');
+    const res = await post(obj, '/lengthwave/guess', {
+      gameId: 'g1',
+      userId: 'u1',
+      guess: 0.5,
+    });
+    expect((await res.json()).ownGamut).to.equal(true);
+    expect(await ctx.storage.get('scores')).to.equal(undefined);
+  });
 
+  it('marks the answer and guess even below the first tile centre', () => {
     const body = generate_guess_response_message_embed(
-      'g1',
-      got,
-      0.5,
-      { username: 'nox', id: 'u1', avatar: null },
-      ' (your own gamut - not counted)',
+      'g',
+      { prompt: { left: 'a', right: 'b' }, position: 0.01 },
+      0.01,
+      { username: 'nox', id: '1', avatar: null },
     );
-    expect(body.data.embeds[0].description).to.include('not counted');
+    const lines = body.data.embeds[0].description.split('\n');
+    const first = lines[lines.indexOf('a') + 1];
+    expect(first).to.include('🟦 < Actual 0.01');
+    expect(first).to.include('Your guess 0.01');
   });
 
   it('scores by distance', () => {
@@ -126,6 +133,43 @@ describe('UserData', () => {
     const ctx = fakeCtx({ mailbox: [{ sender: 'a' }, { sender: 'b' }] });
     await post(new UserData(ctx), '/deleteMail', { index: 1 });
     expect(await ctx.storage.get('mailbox')).to.deep.equal([{ sender: 'b' }]);
+  });
+
+  it('/deleteMail clears only when no index is given, never on 0', async () => {
+    const mailbox = [{ sender: 'a' }];
+    const zero = fakeCtx({ mailbox });
+    const res = await post(new UserData(zero), '/deleteMail', { index: 0 });
+    expect(res.status).to.equal(400);
+    expect(await zero.storage.get('mailbox')).to.have.lengthOf(1);
+
+    const none = fakeCtx({ mailbox });
+    await post(new UserData(none), '/deleteMail', {});
+    expect(await none.storage.get('mailbox')).to.deep.equal([]);
+  });
+
+  it('refuses to set or increment mailbox, settings or chat data', async () => {
+    for (const key of ['mailbox', 'settings', 'chat:1']) {
+      const ctx = fakeCtx({ [key]: 'keep' });
+      const set = await post(new UserData(ctx), '/set', { [key]: 5 });
+      const inc = await post(new UserData(ctx), '/increment', { key });
+      expect(set.status, key).to.equal(400);
+      expect(inc.status, key).to.equal(400);
+      expect(await ctx.storage.get(key)).to.equal('keep');
+    }
+  });
+
+  it('/dropStats deletes stats but keeps mail, settings and chat', async () => {
+    const ctx = fakeCtx({
+      kills: 3,
+      mailbox: [{}],
+      settings: { a: 1 },
+      'chat:1': {},
+    });
+    await post(new UserData(ctx), '/dropStats', {});
+    expect(await ctx.storage.get('kills')).to.equal(undefined);
+    expect(await ctx.storage.get('mailbox')).to.deep.equal([{}]);
+    expect(await ctx.storage.get('settings')).to.deep.equal({ a: 1 });
+    expect(await ctx.storage.get('chat:1')).to.deep.equal({});
   });
 });
 
@@ -243,29 +287,38 @@ describe('lengthwave scoring', () => {
     expect(await res.json()).to.deep.equal({ gamut_score: 13 });
   });
 
-  it('claims a guess once, so the same gamut cannot be farmed', async () => {
+  it('claims a guess once and banks its score, so a gamut cannot be farmed', async () => {
     const ctx = fakeCtx({ g1: { position: 0.5, prompt: { left: 'a', right: 'b' } } });
     const obj = new UserData(ctx);
+    const guess = (userId, g) =>
+      post(obj, '/lengthwave/guess', { gameId: 'g1', userId, guess: g });
 
-    const first = await post(obj, '/lengthwave/guess', { gameId: 'g1', userId: 'u1' });
-    expect((await first.json()).already).to.equal(false);
+    expect((await (await guess('u1', 0.5)).json()).already).to.equal(false);
+    expect((await (await guess('u1', 0.5)).json()).already).to.equal(true);
+    expect((await (await guess('u2', 0.55)).json()).already).to.equal(false);
 
-    const second = await post(obj, '/lengthwave/guess', { gameId: 'g1', userId: 'u1' });
-    expect((await second.json()).already).to.equal(true);
-
-    const other = await post(obj, '/lengthwave/guess', { gameId: 'g1', userId: 'u2' });
-    expect((await other.json()).already).to.equal(false);
+    const res = await obj.fetch(new Request('https://dummy/lengthwave/scores'));
+    expect(await res.json()).to.deep.equal({
+      u1: { score: 4, games: 1 },
+      u2: { score: 3, games: 1 },
+    });
   });
 
-  it('tracks the player roster without duplicates', async () => {
-    const ctx = fakeCtx();
-    const obj = new UserData(ctx);
-    await post(obj, '/lengthwave/players', { userId: 'u1' });
-    await post(obj, '/lengthwave/players', { userId: 'u1' });
-    await post(obj, '/lengthwave/players', { userId: 'u2' });
-
-    const res = await obj.fetch(new Request('https://dummy/lengthwave/players'));
-    expect((await res.json()).players).to.deep.equal(['u1', 'u2']);
+  it('migrates the old player roster into the scoreboard once', async () => {
+    const ctx = fakeCtx({ players: ['u1'] });
+    const env = {
+      NOXBOT_DATA: {
+        idFromName: (n) => n,
+        get: () => ({
+          fetch: async () => Response.json({ gamut_score: 7, gamut_games: 2 }),
+        }),
+      },
+    };
+    const res = await new UserData(ctx, env).fetch(
+      new Request('https://dummy/lengthwave/scores'),
+    );
+    expect(await res.json()).to.deep.equal({ u1: { score: 7, games: 2 } });
+    expect(await ctx.storage.get('players')).to.equal(undefined);
   });
 });
 
@@ -299,6 +352,39 @@ describe('mailbox rendering', () => {
 });
 
 describe('chat stats', () => {
+  it('pages forward from the watermark and stops at the page cap', async () => {
+    const realFetch = globalThis.fetch;
+    let calls = 0;
+    // An endless channel: every page is full, ids climb.
+    globalThis.fetch = async (url) => {
+      const after = BigInt(new URL(url).searchParams.get('after'));
+      calls++;
+      return Response.json(
+        Array.from({ length: 100 }, (_, i) => ({
+          id: String(after + BigInt(100 - i)),
+          author: { id: i % 2 ? 'me' : 'other' },
+          content: 'hello there',
+        })),
+      );
+    };
+
+    try {
+      const { chatData, caughtUp } = await getStatsOnUser(
+        'c',
+        'me',
+        { lastMessageId: '1000' },
+        't',
+      );
+      expect(caughtUp).to.equal(false);
+      expect(calls).to.equal(40);
+      expect(chatData.lastMessageId).to.equal(String(1000 + 40 * 100));
+      expect(chatData.messages).to.equal(40 * 50);
+      expect(chatData.words.hello).to.equal(40 * 50);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
   it('ranks words by count and caps the list', () => {
     const words = Object.fromEntries(
       Array.from({ length: 40 }, (_, i) => [`w${i}`, i]),

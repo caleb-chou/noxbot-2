@@ -1,7 +1,10 @@
-import { InteractionResponseFlags } from 'discord-interactions';
-import { InteractionResponseType } from 'discord-interactions';
-import { JsonResponse, interactionUser } from '../util.js';
+import {
+  InteractionResponseFlags,
+  InteractionResponseType,
+} from 'discord-interactions';
+import { interactionUser, avatarUrl } from '../util.js';
 
+// [answer, mood]: 0 = yes, 1 = unsure, 2 = no
 const eightBallResponses = [
   ['It is certain.', 0],
   ['It is decidedly so.', 0],
@@ -24,44 +27,26 @@ const eightBallResponses = [
   ['Outlook not so good.', 2],
   ['Very doubtful.', 2],
 ];
-export async function eightBall(question, interaction, ephemeral) {
+const MOOD_COLORS = [0x00ff00, 0xffff00, 0xff0000];
+
+export function eightBall(question, interaction, ephemeral) {
   const user = interactionUser(interaction);
-  const result =
+  const [answer, mood] =
     eightBallResponses[Math.floor(Math.random() * eightBallResponses.length)];
-  let color;
-  switch (result[1]) {
-    case 0:
-      color = 0x00ff00;
-      break;
-    case 1:
-      color = 0xffff00;
-      break;
-    case 2:
-      color = 0xff0000;
-      break;
-    default:
-      color = 0x000000;
-      break;
-  }
-  const body = {
+  return Response.json({
     type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
     data: {
       embeds: [
         {
           author: {
             name: `${user.username} asked: "${question}"`,
-            icon_url: user.avatar
-              ? `https://cdn.discordapp.com/avatars/${user.id}/${user.avatar}.png`
-              : undefined,
+            icon_url: avatarUrl(user),
           },
-          description: `🎱 8Ball says...\n→ **${result[0]}**`,
-          color: color,
+          description: `🎱 8Ball says...\n→ **${answer}**`,
+          color: MOOD_COLORS[mood],
         },
       ],
+      flags: ephemeral ? InteractionResponseFlags.EPHEMERAL : undefined,
     },
-  };
-  if (ephemeral) {
-    body.data.flags = InteractionResponseFlags.EPHEMERAL;
-  }
-  return new JsonResponse(body);
+  });
 }
