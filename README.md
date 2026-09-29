@@ -2,7 +2,11 @@
 
 A Discord bot running on a Cloudflare Worker, with per-user data in a Durable Object.
 
-Commands: `/coinflip`, `/8ball`, `/lengthwave` + `/leaderboard` (a Wavelength-style guessing game), mail (`/sendmail`, `/checkmail`, `/readmail`, `/deletemail`), stats (`/getstats`, plus admin-only `/incrementuserdata`, `/updatestats`, `/dropstats`), `/emote` (copy a 7tv emote), `/choosesomeone`, `/chattrack`, settings (`/getsettings`, `/updatesettings`) and `/invite`.
+Commands: `/coinflip`, `/8ball`, `/lengthwave` + `/leaderboard` (a Wavelength-style guessing game), mail (`/sendmail`, `/checkmail`, `/readmail`, `/deletemail`), stats (`/getstats`, plus admin-only `/incrementuserdata`, `/updatestats`, `/dropstats`), `/emote` (copy a 7tv emote), `/choosesomeone`, `/chattrack`, `/roll`, `/remindme` (DMs you later) and `/reminders` (list or cancel them), settings (`/getsettings`, `/updatesettings`) and `/invite`.
+
+Right-click menus: **Send mail** and **Get stats** on a user, **Steal emoji** on a message (copies its first custom emoji to the server).
+
+noxbot deliberately stores nothing personal beyond what a command needs (mail, reminders, stats). Features that would track personal details, like birthdays, are out of scope.
 
 ## Project structure
 

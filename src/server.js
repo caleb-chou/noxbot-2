@@ -29,6 +29,12 @@ import {
   PICK_RANDOM_USER_COMMAND,
   CHAT_TRACK_COMMAND,
   LEADERBOARD_COMMAND,
+  ROLL_COMMAND,
+  REMINDME_COMMAND,
+  REMINDERS_COMMAND,
+  SEND_MAIL_MENU,
+  GET_STATS_MENU,
+  STEAL_EMOJI_MENU,
 } from './commands.js';
 import { createCoolRole, assignRole } from './functions/coolrole.js';
 import { UserData } from './resources/UserData.js';
@@ -62,7 +68,14 @@ import {
   getStatsOnUser,
   newestMessageId,
 } from './functions/chattrack.js';
-import { add_emoji, image_to_buffer } from './functions/emoji.js';
+import { add_emoji, image_to_buffer, stealEmoji } from './functions/emoji.js';
+import { rollDice } from './functions/roll.js';
+import {
+  parseDuration,
+  remindersListMessage,
+  MIN_REMINDER_MS,
+  MAX_REMINDER_MS,
+} from './functions/remind.js';
 
 const router = AutoRouter();
 
@@ -103,6 +116,10 @@ const modalValue = (interaction, id) =>
     ?.flatMap((row) => row.components ?? [])
     .find((c) => c.custom_id === id)?.value;
 
+/** The user a right-click "user" menu command was used on. */
+const targetUser = (interaction) =>
+  interaction.data.resolved?.users?.[interaction.data.target_id];
+
 const guildIdOf = (interaction) => interaction.guild_id ?? interaction.guild?.id;
 
 const randomCategory = () =>
@@ -112,6 +129,34 @@ async function mailboxResponse(env, user) {
   const res = await userData(env, user.id).fetch('https://dummy/getMailbox');
   const { mailbox } = await res.json();
   return Response.json(createMailboxEmbed(user, mailbox));
+}
+
+async function statsResponse(env, user, stat, ephemeral) {
+  const data = await (await userData(env, user.id).fetch('https://dummy/get')).json();
+
+  const embed = {
+    type: 'rich',
+    author: {
+      name: `Stats for ${user.username}`,
+      icon_url: avatarUrl(user) ?? 'https://cdn.discordapp.com/embed/avatars/0.png',
+    },
+    color: 0x5865f2, // blurple
+    fields: [],
+  };
+
+  if (stat) {
+    embed.fields.push({ name: stat, value: `${data[stat] ?? '0'}`, inline: true });
+  } else {
+    // Discord rejects embeds with more than 25 fields.
+    for (const [key, value] of Object.entries(data).slice(0, 25)) {
+      embed.fields.push({ name: key, value: `${value}`, inline: true });
+    }
+    if (embed.fields.length === 0) {
+      embed.description = 'No stats found for this user.';
+    }
+  }
+
+  return reply({ embeds: [embed] }, ephemeral);
 }
 
 /** Create a gamut and persist it so the clue/guess modals can look it up later. */
@@ -169,6 +214,7 @@ router.post('/', async (request, env, ctx) => {
 
       const mail = {
         sender: interactionUser(interaction).username,
+        senderId: interactionUser(interaction).id,
         subject: modalValue(interaction, 'subject_input'),
         message: modalValue(interaction, 'message_input'),
         timestamp: new Date().toISOString(),
@@ -249,6 +295,22 @@ router.post('/', async (request, env, ctx) => {
       return mailboxResponse(env, interactionUser(interaction));
     }
 
+    // Picked from the /reminders dropdown: cancel it and redraw the list in place.
+    if (customId === 'cancel_reminder') {
+      const user = interactionUser(interaction);
+      const res = await post(userData(env, user.id), '/cancelReminder', {
+        id: interaction.data.values?.[0],
+      });
+      return Response.json({
+        type: InteractionResponseType.UPDATE_MESSAGE,
+        data: remindersListMessage(await res.json()),
+      });
+    }
+
+    if (customId.startsWith('mail_reply|')) {
+      return Response.json(createMailboxModal({ id: customId.split('|')[1] }));
+    }
+
     if (customId === 'gamut_clue_button') {
       const game_id = interaction.message.embeds[0].footer.text;
       return Response.json(createLengthWaveClueModal(game_id));
@@ -261,6 +323,26 @@ router.post('/', async (request, env, ctx) => {
     if (customId.startsWith('gamut_guess_button')) {
       return Response.json(createLengthWaveGuessModal(customId.split('|')[1]));
     }
+  }
+
+  // Only the `stat` options autocomplete: suggest stats the target already has.
+  if (interaction.type === InteractionType.APPLICATION_COMMAND_AUTOCOMPLETE) {
+    const typed = String(
+      interaction.data.options?.find((o) => o.focused)?.value ?? '',
+    ).toLowerCase();
+    const userId = opt(interaction, 'user') ?? interactionUser(interaction).id;
+    const stats = await (await userData(env, userId).fetch('https://dummy/get')).json();
+
+    return Response.json({
+      type: InteractionResponseType.APPLICATION_COMMAND_AUTOCOMPLETE_RESULT,
+      data: {
+        // Discord caps choices at 25 and names/values at 100 characters.
+        choices: Object.keys(stats)
+          .filter((k) => k.length <= 100 && k.toLowerCase().includes(typed))
+          .slice(0, 25)
+          .map((k) => ({ name: k, value: k })),
+      },
+    });
   }
 
   if (interaction.type === InteractionType.APPLICATION_COMMAND) {
@@ -298,37 +380,84 @@ router.post('/', async (request, env, ctx) => {
       }
 
       case GET_STATS_COMMAND.name: {
-        const self = interactionUser(interaction);
-        const userId = opt(interaction, 'user') ?? self.id;
-        const stat = opt(interaction, 'stat');
+        const target = opt(interaction, 'user');
+        const user = target
+          ? interaction.data.resolved?.users?.[target]
+          : interactionUser(interaction);
+        return statsResponse(env, user, opt(interaction, 'stat'), ephemeral);
+      }
 
-        const data = await (await userData(env, userId).fetch('https://dummy/get')).json();
-        const resolvedUser = interaction.data.resolved?.users?.[userId] ?? self;
+      case GET_STATS_MENU.name:
+        return statsResponse(env, targetUser(interaction), undefined, true);
 
-        const embed = {
-          type: 'rich',
-          author: {
-            name: `Stats for ${resolvedUser?.username}`,
-            icon_url:
-              avatarUrl(resolvedUser) ?? 'https://cdn.discordapp.com/embed/avatars/0.png',
+      case SEND_MAIL_MENU.name:
+        return Response.json(createMailboxModal(targetUser(interaction)));
+
+      case STEAL_EMOJI_MENU.name: {
+        const guildId = guildIdOf(interaction);
+        if (!guildId) {
+          return ephemeralText('Use this inside a server.');
+        }
+        const message = interaction.data.resolved?.messages?.[interaction.data.target_id];
+
+        return deferred(
+          env,
+          ctx,
+          interaction,
+          async () => {
+            const { name, data } = await stealEmoji(message?.content);
+            await add_emoji(env.DISCORD_TOKEN, guildId, name, data);
+            return { content: `Added :${name}: to the server!` };
           },
-          color: 0x5865f2, // blurple
-          fields: [],
-        };
+          true,
+        );
+      }
 
-        if (stat) {
-          embed.fields.push({ name: stat, value: `${data[stat] ?? '0'}`, inline: true });
-        } else {
-          // Discord rejects embeds with more than 25 fields.
-          for (const [key, value] of Object.entries(data).slice(0, 25)) {
-            embed.fields.push({ name: key, value: `${value}`, inline: true });
-          }
-          if (embed.fields.length === 0) {
-            embed.description = 'No stats found for this user.';
-          }
+      case ROLL_COMMAND.name: {
+        const dice = opt(interaction, 'dice') ?? '1d6';
+        let result;
+        try {
+          result = rollDice(dice);
+        } catch (err) {
+          return ephemeralText(err.message);
+        }
+        const { rolls, modifier, total } = result;
+        const mod = modifier ? ` ${modifier > 0 ? '+' : '-'} ${Math.abs(modifier)}` : '';
+        return reply({
+          content: `🎲 ${interactionUser(interaction).username} rolled \`${dice}\`: [${rolls.join(', ')}]${mod} = **${total}**`,
+        });
+      }
+
+      case REMINDME_COMMAND.name: {
+        const ms = parseDuration(opt(interaction, 'in'));
+        // NaN fails both comparisons, so unparseable input lands here too.
+        if (!(ms >= MIN_REMINDER_MS && ms <= MAX_REMINDER_MS)) {
+          return ephemeralText(
+            'Give a time between 1m and 365d, like `10m`, `2h30m` or `3d`.',
+          );
         }
 
-        return reply({ embeds: [embed] }, ephemeral);
+        const user = interactionUser(interaction);
+        const now = Date.now();
+        const at = now + ms;
+        const res = await post(userData(env, user.id), '/addReminder', {
+          userId: user.id,
+          at,
+          text: opt(interaction, 'text'),
+          createdAt: now,
+        });
+        if (!res.ok) {
+          return ephemeralText((await res.json()).error);
+        }
+        return ephemeralText(
+          `⏰ I'll DM you <t:${Math.floor(at / 1000)}:R>. Make sure your DMs are open to the bot. See or cancel it with \`/reminders\`.`,
+        );
+      }
+
+      case REMINDERS_COMMAND.name: {
+        const user = interactionUser(interaction);
+        const res = await userData(env, user.id).fetch('https://dummy/getReminders');
+        return reply(remindersListMessage(await res.json()), true);
       }
 
       case UPDATE_STATS_COMMAND.name: {
@@ -441,19 +570,7 @@ router.post('/', async (request, env, ctx) => {
           interaction,
           async () => {
             const emoteData = await image_to_buffer(emoteUrl);
-            const response = await add_emoji(
-              env.DISCORD_TOKEN,
-              guildId,
-              emoteName,
-              emoteData,
-            );
-
-            if (!response.ok) {
-              const err = await response.text();
-              console.error('add_emoji failed:', response.status, err);
-              throw new Error(`Discord rejected it (${response.status})`);
-            }
-
+            await add_emoji(env.DISCORD_TOKEN, guildId, emoteName, emoteData);
             return { content: `Added ${emoteName} to the server!` };
           },
           true,

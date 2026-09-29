@@ -72,11 +72,8 @@ export async function deferred(env, ctx, interaction, work, ephemeral = false) {
   });
 }
 
-/**
- * DM someone that mail arrived. The button posts a `check_mailbox` component
- * interaction back to this worker, so they can read it without leaving the DM.
- */
-export async function sendMailNotification(recipientId, mail, env) {
+/** DM a user. Logs and returns false on failure (e.g. their DMs are closed). */
+export async function sendDM(env, userId, message) {
   const headers = {
     Authorization: `Bot ${env.DISCORD_TOKEN}`,
     'Content-Type': 'application/json',
@@ -85,46 +82,53 @@ export async function sendMailNotification(recipientId, mail, env) {
   const dmChannelRes = await fetch(`${DISCORD_API}/users/@me/channels`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ recipient_id: recipientId }),
+    body: JSON.stringify({ recipient_id: userId }),
   });
-
   if (!dmChannelRes.ok) {
     console.error('Failed to create DM channel:', await dmChannelRes.text());
-    return;
+    return false;
   }
 
   const dmChannel = await dmChannelRes.json();
-
   const messageRes = await fetch(`${DISCORD_API}/channels/${dmChannel.id}/messages`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({
-      embeds: [
-        {
-          title: '📬 You have new mail!',
-          description: mail?.subject ? `**${mail.subject}**` : undefined,
-          color: 0x3498db,
-          footer: { text: `From @${mail?.sender ?? 'someone'}` },
-          timestamp: mail?.timestamp,
-        },
-      ],
-      components: [
-        {
-          type: 1, // Action row
-          components: [
-            {
-              type: 2, // Button
-              style: 1, // Primary
-              label: 'Open mailbox',
-              custom_id: 'check_mailbox',
-            },
-          ],
-        },
-      ],
-    }),
+    body: JSON.stringify(message),
   });
-
   if (!messageRes.ok) {
     console.error('Failed to send DM message:', await messageRes.text());
+    return false;
   }
+  return true;
+}
+
+/**
+ * DM someone that mail arrived. The button posts a `check_mailbox` component
+ * interaction back to this worker, so they can read it without leaving the DM.
+ */
+export function sendMailNotification(recipientId, mail, env) {
+  return sendDM(env, recipientId, {
+    embeds: [
+      {
+        title: '📬 You have new mail!',
+        description: mail?.subject ? `**${mail.subject}**` : undefined,
+        color: 0x3498db,
+        footer: { text: `From @${mail?.sender ?? 'someone'}` },
+        timestamp: mail?.timestamp,
+      },
+    ],
+    components: [
+      {
+        type: 1, // Action row
+        components: [
+          {
+            type: 2, // Button
+            style: 1, // Primary
+            label: 'Open mailbox',
+            custom_id: 'check_mailbox',
+          },
+        ],
+      },
+    ],
+  });
 }

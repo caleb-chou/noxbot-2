@@ -36,8 +36,31 @@ export async function image_to_buffer(url) {
   return `data:${DISCORD_MIME[file.format]};base64,${b64}`;
 }
 
+const CUSTOM_EMOJI = /<(a?):(\w{2,32}):(\d+)>/;
+
+/**
+ * The first custom emoji in a message, as { name, data } ready for add_emoji.
+ * Discord's own emoji are already under its size limit, so no checks needed.
+ */
+export async function stealEmoji(content) {
+  const match = CUSTOM_EMOJI.exec(content ?? '');
+  if (!match) {
+    throw new Error('that message has no custom emoji');
+  }
+  const [, animated, name, id] = match;
+  const ext = animated ? 'gif' : 'png';
+
+  const res = await fetch(`https://cdn.discordapp.com/emojis/${id}.${ext}`);
+  if (!res.ok) {
+    throw new Error(`Discord's CDN returned ${res.status} for :${name}:`);
+  }
+  const b64 = arrayBufferToBase64(await res.arrayBuffer());
+  return { name, data: `data:image/${ext};base64,${b64}` };
+}
+
+/** Upload an emoji to a server; throws a user-facing message if Discord refuses. */
 export async function add_emoji(token, guildId, name, image_data) {
-  return fetch(`${DISCORD_API}/guilds/${guildId}/emojis`, {
+  const res = await fetch(`${DISCORD_API}/guilds/${guildId}/emojis`, {
     method: 'POST',
     headers: {
       Authorization: `Bot ${token}`,
@@ -45,6 +68,10 @@ export async function add_emoji(token, guildId, name, image_data) {
     },
     body: JSON.stringify({ name, image: image_data }),
   });
+  if (!res.ok) {
+    console.error('add_emoji failed:', res.status, await res.text());
+    throw new Error(`Discord rejected it (${res.status})`);
+  }
 }
 
 function arrayBufferToBase64(buffer) {
