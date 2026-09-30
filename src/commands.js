@@ -47,18 +47,18 @@ export const INCREMENT_STATS_COMMAND = {
       required: true,
     },
     {
-      name: 'ephemeral',
-      description: 'Make the response ephemeral',
-      type: 5, // BOOLEAN
-      required: false,
-    },
-    {
       name: 'stat',
       description: 'The stat to increment',
       type: 3, // STRING
       required: true,
       autocomplete: true,
-    }
+    },
+    {
+      name: 'ephemeral',
+      description: 'Make the response ephemeral',
+      type: 5, // BOOLEAN
+      required: false,
+    },
   ]
 };
 

@@ -438,6 +438,30 @@ describe('chat stats', () => {
   });
 });
 
+describe('command definitions Discord will accept', () => {
+  it('puts required options before optional ones', () => {
+    for (const [name, cmd] of Object.entries(commands)) {
+      const required = (cmd.options ?? []).map((o) => Boolean(o.required));
+      expect(required, name).to.deep.equal([...required].sort((a, b) => b - a));
+    }
+  });
+
+  it('describes slash commands and their options, but not context menus', () => {
+    for (const [name, cmd] of Object.entries(commands)) {
+      if (cmd.type === 2 || cmd.type === 3) {
+        expect(cmd.description, name).to.equal(undefined);
+        continue;
+      }
+      expect(cmd.name, name).to.match(/^[a-z0-9_-]{1,32}$/);
+      for (const item of [cmd, ...(cmd.options ?? [])]) {
+        expect(item.description, `${name} ${item.name}`)
+          .to.be.a('string')
+          .with.length.within(1, 100);
+      }
+    }
+  });
+});
+
 describe('DM support', () => {
   it('scopes every command to a context, and none is left undeclared', () => {
     for (const [name, cmd] of Object.entries(commands)) {
