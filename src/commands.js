@@ -409,3 +409,28 @@ export const REMINDERS_COMMAND = {
   name: 'reminders',
   description: 'See your reminders, or cancel one',
 };
+
+// The Mind: a cooperative card game played with buttons in a channel.
+// Subcommands take no options, so there is no required/optional ordering to trip over.
+export const MIND_COMMAND = {
+  ...GUILD_ONLY,
+  name: 'mind',
+  description: 'Play The Mind with your server',
+  options: [
+    {
+      name: 'start',
+      description: 'Open a lobby for a new game in this channel',
+      type: 1, // SUB_COMMAND
+    },
+    {
+      name: 'end',
+      description: 'End the game or lobby in this channel',
+      type: 1,
+    },
+    {
+      name: 'leaderboard',
+      description: 'See the best Mind teams',
+      type: 1,
+    },
+  ],
+};

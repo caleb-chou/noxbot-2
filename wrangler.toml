@@ -15,6 +15,14 @@ enabled = true
 name = "NOXBOT_DATA"
 class_name = "UserData"
 
+[[durable_objects.bindings]]
+name = "NOXBOT_MIND"
+class_name = "MindGame"
+
 [[migrations]]
 tag = "v1" # Should be unique for each entry
 new_sqlite_classes = ["UserData"] # Array of new classes
+
+[[migrations]]
+tag = "v2"
+new_sqlite_classes = ["MindGame"]

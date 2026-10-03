@@ -35,9 +35,11 @@ import {
   SEND_MAIL_MENU,
   GET_STATS_MENU,
   STEAL_EMOJI_MENU,
+  MIND_COMMAND,
 } from './commands.js';
 import { createCoolRole, assignRole } from './functions/coolrole.js';
 import { UserData } from './resources/UserData.js';
+import { MindGame } from './resources/MindGame.js';
 import {
   sendMailNotification,
   interactionUser,
@@ -45,6 +47,7 @@ import {
   background,
   opt,
   avatarUrl,
+  editOriginalResponse,
   DISCORD_API,
 } from './util.js';
 import { coinFlip } from './functions/coinflip.js';
@@ -76,6 +79,7 @@ import {
   MIN_REMINDER_MS,
   MAX_REMINDER_MS,
 } from './functions/remind.js';
+import { lobbyMessage } from './functions/mind.js';
 
 const router = AutoRouter();
 
@@ -168,6 +172,186 @@ async function newGamut(env, prompts, position, creatorId) {
     game_data: { ...game_data, creator: creatorId },
   });
   return Response.json(message);
+}
+
+const mindGame = (env, channelId) =>
+  env.NOXBOT_MIND.get(env.NOXBOT_MIND.idFromName(`mind:${channelId}`));
+
+/** Redraw the message a button sits on. */
+const updateMessage = (data) =>
+  Response.json({ type: InteractionResponseType.UPDATE_MESSAGE, data });
+
+/** Call one MindGame route as the acting user. The DO owns every rule and the stale-button check. */
+async function mindCall(env, interaction, path, extra = {}) {
+  const res = await post(mindGame(env, interaction.channel_id), path, {
+    userId: interactionUser(interaction).id,
+    hostId: interactionUser(interaction).id,
+    isAdmin: isAdmin(interaction),
+    channelId: interaction.channel_id,
+    guildId: guildIdOf(interaction),
+    messageId: interaction.message?.id,
+    ...extra,
+  });
+  return res.json();
+}
+
+/**
+ * End the game. The DO decides who may: the host, a participant or an
+ * administrator for /end, the host or an administrator for the Cancel button.
+ */
+const mindEnd = (env, interaction, { cancel = false } = {}) =>
+  mindCall(env, interaction, cancel ? '/cancel' : '/end', {
+    // /mind end is not pressed on the panel, so it has no message id to check.
+    messageId: cancel ? interaction.message?.id : undefined,
+  });
+
+/** Handle a mind_<action>|<channelId>[|yes|no] button press. */
+async function mindComponent(env, interaction) {
+  const [action, channelId, choice] = interaction.data.custom_id
+    .slice('mind_'.length)
+    .split('|');
+  // The id in the custom_id is only a sanity check against a mangled payload.
+  if (!interaction.channel_id || channelId !== interaction.channel_id) {
+    return ephemeralText('This game belongs to a different channel.');
+  }
+
+  const routes = {
+    leave: '/leave',
+    begin: '/begin',
+    play: '/play',
+    shuriken: '/shuriken',
+    next: '/next',
+  };
+
+  let result;
+  if (action === 'hand') {
+    result = await mindCall(env, interaction, '/hand');
+    return result.error || !result.message
+      ? ephemeralText(result.error ?? 'You are not in this game.')
+      : reply(result.message, true);
+  }
+  if (action === 'join') {
+    if (interactionUser(interaction).bot) {
+      return ephemeralText('Bots cannot play The Mind.');
+    }
+    result = await mindCall(env, interaction, '/join');
+  } else if (action === 'cancel') {
+    result = await mindEnd(env, interaction, { cancel: true });
+  } else if (action === 'vote') {
+    if (choice !== 'yes' && choice !== 'no') {
+      return ephemeralText('That vote button is not valid.');
+    }
+    result = await mindCall(env, interaction, '/vote', { agree: choice === 'yes' });
+  } else if (routes[action]) {
+    result = await mindCall(env, interaction, routes[action]);
+  } else {
+    return ephemeralText('Unknown Mind action.');
+  }
+
+  if (result.error || !result.message) {
+    return ephemeralText(result.error ?? 'Something went wrong with that game.');
+  }
+  return updateMessage(result.message);
+}
+
+/** /mind start: open the lobby, post it, then remember the posted message's id. */
+async function mindStart(env, ctx, interaction) {
+  if (!interaction.channel_id) {
+    return ephemeralText('Run /mind start in a channel.');
+  }
+  const created = await mindCall(env, interaction, '/lobby');
+  if (created.error) {
+    return ephemeralText(created.error);
+  }
+
+  // A slash command reply carries no message id, so defer, fill the placeholder
+  // with PATCH @original (which returns the message), and store its id.
+  await background(
+    ctx,
+    (async () => {
+      try {
+        const res = await editOriginalResponse(
+          env,
+          interaction,
+          created.message ?? lobbyMessage(created.state),
+        );
+        if (!res.ok) {
+          throw new Error(`Discord returned ${res.status}`);
+        }
+        const posted = await res.json();
+        await mindCall(env, interaction, '/setMessage', { messageId: posted.id });
+      } catch (err) {
+        console.error('mind lobby post failed:', err);
+        // Free the channel so the host is not locked out by a lobby nobody can see.
+        await mindCall(env, interaction, '/end', { reason: 'ended' });
+        await editOriginalResponse(env, interaction, {
+          content: `Could not post the lobby: ${err.message}`,
+        });
+      }
+    })(),
+  );
+  return Response.json({
+    type: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
+    data: {},
+  });
+}
+
+/** /mind end: end the game, then redraw the panel through the REST API. */
+async function mindEndCommand(env, ctx, interaction) {
+  if (!interaction.channel_id) {
+    return ephemeralText('Run /mind end in a channel.');
+  }
+  const result = await mindEnd(env, interaction);
+  if (result.error) {
+    return ephemeralText(result.error);
+  }
+  const messageId = result.state?.messageId;
+  if (messageId && result.message) {
+    await background(
+      ctx,
+      fetch(`${DISCORD_API}/channels/${interaction.channel_id}/messages/${messageId}`, {
+        method: 'PATCH',
+        headers: {
+          Authorization: `Bot ${env.DISCORD_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(result.message),
+      }).catch((err) => console.error('mind panel edit failed:', err)),
+    );
+  }
+  return ephemeralText('Game ended.');
+}
+
+function mindLeaderboard(env, ctx, interaction) {
+  return deferred(env, ctx, interaction, async () => {
+    // MindGame stores the aggregate under the 'mind' key of the 'mind' UserData.
+    const { mind: scores } = await (
+      await userData(env, 'mind').fetch('https://dummy/get')
+    ).json();
+    const rows = Object.entries(scores ?? {})
+      .map(([id, s]) => ({ id, ...s }))
+      .sort((a, b) => b.bestLevel - a.bestLevel || b.wins - a.wins);
+
+    if (rows.length === 0) {
+      return { content: 'Nobody has played The Mind yet. `/mind start`!' };
+    }
+    return {
+      embeds: [
+        {
+          title: '🧠 The Mind leaderboard',
+          description: rows
+            .slice(0, 10)
+            .map(
+              (r, i) =>
+                `${i + 1}. <@${r.id}> — level **${r.bestLevel}**, ${r.wins} win${r.wins === 1 ? '' : 's'} in ${r.games} game${r.games === 1 ? '' : 's'}`,
+            )
+            .join('\n'),
+          color: 0x5865f2,
+        },
+      ],
+      allowed_mentions: { parse: [] },
+    };
+  });
 }
 
 /**
@@ -309,6 +493,10 @@ router.post('/', async (request, env, ctx) => {
 
     if (customId.startsWith('mail_reply|')) {
       return Response.json(createMailboxModal({ id: customId.split('|')[1] }));
+    }
+
+    if (customId.startsWith('mind_')) {
+      return mindComponent(env, interaction);
     }
 
     if (customId === 'gamut_clue_button') {
@@ -526,6 +714,19 @@ router.post('/', async (request, env, ctx) => {
         const user = interactionUser(interaction);
         await post(userData(env, user.id), '/updateSettings', { [setting]: value });
         return ephemeralText(`Updated the ${setting} value to ${value}`);
+      }
+
+      case MIND_COMMAND.name: {
+        switch (interaction.data.options?.[0]?.name) {
+          case 'start':
+            return mindStart(env, ctx, interaction);
+          case 'end':
+            return mindEndCommand(env, ctx, interaction);
+          case 'leaderboard':
+            return mindLeaderboard(env, ctx, interaction);
+          default:
+            return ephemeralText('Unknown /mind subcommand.');
+        }
       }
 
       case LENGTHWAVE_COMMAND.name: {
@@ -768,4 +969,4 @@ const server = {
 };
 
 export default server;
-export { UserData };
+export { UserData, MindGame };
