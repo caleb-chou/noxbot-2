@@ -412,10 +412,13 @@ export const REMINDERS_COMMAND = {
 
 // The Mind: a cooperative card game played with buttons in a channel.
 // Subcommands take no options, so there is no required/optional ordering to trip over.
+// Playable in servers, group DMs and DMs between users. Not in the bot's own DM
+// (context 1): the bot can't join, so a game there could never reach two players.
 export const MIND_COMMAND = {
-  ...GUILD_ONLY,
+  integration_types: [0, 1],
+  contexts: [0, 2],
   name: 'mind',
-  description: 'Play The Mind with your server',
+  description: 'Play The Mind with friends',
   options: [
     {
       name: 'start',

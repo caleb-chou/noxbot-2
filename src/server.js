@@ -190,6 +190,7 @@ async function mindCall(env, interaction, path, extra = {}) {
     channelId: interaction.channel_id,
     guildId: guildIdOf(interaction),
     messageId: interaction.message?.id,
+    token: interaction.token,
     ...extra,
   });
   return res.json();
@@ -199,8 +200,9 @@ async function mindCall(env, interaction, path, extra = {}) {
  * End the game. The DO decides who may: the host, a participant or an
  * administrator for /end, the host or an administrator for the Cancel button.
  */
-const mindEnd = (env, interaction, { cancel = false } = {}) =>
+const mindEnd = (env, interaction, { cancel = false, redraw = false } = {}) =>
   mindCall(env, interaction, cancel ? '/cancel' : '/end', {
+    redraw,
     // /mind end is not pressed on the panel, so it has no message id to check.
     messageId: cancel ? interaction.message?.id : undefined,
   });
@@ -296,28 +298,14 @@ async function mindStart(env, ctx, interaction) {
   });
 }
 
-/** /mind end: end the game, then redraw the panel through the REST API. */
+/** /mind end: end the game; the DO redraws the panel. */
 async function mindEndCommand(env, ctx, interaction) {
   if (!interaction.channel_id) {
     return ephemeralText('Run /mind end in a channel.');
   }
-  const result = await mindEnd(env, interaction);
+  const result = await mindEnd(env, interaction, { redraw: true });
   if (result.error) {
     return ephemeralText(result.error);
-  }
-  const messageId = result.state?.messageId;
-  if (messageId && result.message) {
-    await background(
-      ctx,
-      fetch(`${DISCORD_API}/channels/${interaction.channel_id}/messages/${messageId}`, {
-        method: 'PATCH',
-        headers: {
-          Authorization: `Bot ${env.DISCORD_TOKEN}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(result.message),
-      }).catch((err) => console.error('mind panel edit failed:', err)),
-    );
   }
   return ephemeralText('Game ended.');
 }
