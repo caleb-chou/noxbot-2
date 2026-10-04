@@ -35,17 +35,23 @@ function dataEnv() {
       idFromName: (n) => n,
       get: (name) => ({
         fetch: (input, init) =>
-          obj(name).fetch(input instanceof Request ? input : new Request(input, init)),
+          obj(name).fetch(
+            input instanceof Request ? input : new Request(input, init),
+          ),
       }),
     },
-    stats: async (name) => (await obj(name).fetch(new Request('https://dummy/get'))).json(),
+    stats: async (name) =>
+      (await obj(name).fetch(new Request('https://dummy/get'))).json(),
   };
 }
 
 const call = async (mind, path, body = {}) =>
   (
     await mind.fetch(
-      new Request(`https://dummy/${path}`, { method: 'POST', body: JSON.stringify(body) }),
+      new Request(`https://dummy/${path}`, {
+        method: 'POST',
+        body: JSON.stringify(body),
+      }),
     )
   ).json();
 
@@ -55,7 +61,12 @@ const lobby = (mind, host = 'a') =>
 
 /** A started 2-player game with hands we control. */
 function seedPlaying(hands, extra = {}) {
-  let s = newLobby({ hostId: 'a', channelId: CH, guildId: 'g', now: Date.now() });
+  let s = newLobby({
+    hostId: 'a',
+    channelId: CH,
+    guildId: 'g',
+    now: Date.now(),
+  });
   s = join(s, 'b', Date.now()).state;
   s = begin(s, 'a', Date.now()).state;
   return { ...s, hands, messageId: 'm1', ...extra };
@@ -76,19 +87,34 @@ describe('MindGame', () => {
     const mind = new MindGame(fakeCtx(), dataEnv());
     await lobby(mind);
     // No stored id yet: a click cannot be verified, so it is told to retry.
-    expect((await call(mind, 'join', { userId: 'b', messageId: 'any' })).error).to.match(/still being set up/);
-    expect((await call(mind, 'join', { userId: 'b' })).error).to.equal(undefined);
+    expect(
+      (await call(mind, 'join', { userId: 'b', messageId: 'any' })).error,
+    ).to.match(/still being set up/);
+    expect((await call(mind, 'join', { userId: 'b' })).error).to.equal(
+      undefined,
+    );
     await call(mind, 'setMessage', { messageId: 'm1' });
     const stale = await call(mind, 'join', { userId: 'c', messageId: 'old' });
     expect(stale.error).to.match(/over/);
-    expect((await call(mind, 'join', { userId: 'c', messageId: 'm1' })).state.players).to.include('c');
+    expect(
+      (await call(mind, 'join', { userId: 'c', messageId: 'm1' })).state
+        .players,
+    ).to.include('c');
   });
 
   it('does not let a non-participant advance the level', async () => {
-    const state = { ...seedPlaying({ a: [], b: [] }), phase: 'between', level: 1 };
+    const state = {
+      ...seedPlaying({ a: [], b: [] }),
+      phase: 'between',
+      level: 1,
+    };
     const mind = new MindGame(fakeCtx({ game: state }), dataEnv());
-    expect((await call(mind, 'next', { userId: 'zed', messageId: 'm1' })).error).to.match(/not in this game/);
-    expect((await call(mind, 'next', { userId: 'a', messageId: 'm1' })).state.level).to.equal(2);
+    expect(
+      (await call(mind, 'next', { userId: 'zed', messageId: 'm1' })).error,
+    ).to.match(/not in this game/);
+    expect(
+      (await call(mind, 'next', { userId: 'a', messageId: 'm1' })).state.level,
+    ).to.equal(2);
   });
 
   it('returns the panel message and keeps the hand route read-only', async () => {
@@ -122,8 +148,16 @@ describe('MindGame', () => {
     const mind = new MindGame(fakeCtx({ game }), env);
     const res = await call(mind, 'play', { userId: 'b', messageId: 'm1' });
     expect(res.state.phase).to.equal('won');
-    expect(await env.stats('a')).to.include({ mind_games_played: 1, mind_games_won: 1, mind_best_level: 1 });
-    expect((await env.stats('mind')).mind.b).to.deep.equal({ bestLevel: 1, wins: 1, games: 1 });
+    expect(await env.stats('a')).to.include({
+      mind_games_played: 1,
+      mind_games_won: 1,
+      mind_best_level: 1,
+    });
+    expect((await env.stats('mind')).mind.b).to.deep.equal({
+      bestLevel: 1,
+      wins: 1,
+      games: 1,
+    });
     // Already over: further calls and the alarm cannot write again.
     expect((await call(mind, 'end', { userId: 'a' })).error).to.match(/over/);
     expect((await env.stats('a')).mind_games_played).to.equal(1);
@@ -131,7 +165,10 @@ describe('MindGame', () => {
 
   it('counts /mind end after the game started as a loss, but a cancelled lobby as nothing', async () => {
     const env = dataEnv();
-    const mind = new MindGame(fakeCtx({ game: seedPlaying({ a: [1], b: [2] }) }), env);
+    const mind = new MindGame(
+      fakeCtx({ game: seedPlaying({ a: [1], b: [2] }) }),
+      env,
+    );
     const res = await call(mind, 'end', { userId: 'b', messageId: 'm1' });
     expect(res.state.phase).to.equal('ended');
     const stats = await env.stats('a');
@@ -146,16 +183,29 @@ describe('MindGame', () => {
   });
 
   it('only lets the host, a participant or an admin end the game', async () => {
-    const mind = new MindGame(fakeCtx({ game: seedPlaying({ a: [1], b: [2] }) }), dataEnv());
-    expect((await call(mind, 'end', { userId: 'x' })).error).to.match(/host or an admin/);
-    expect((await call(mind, 'end', { userId: 'x', isAdmin: true })).state.phase).to.equal('ended');
+    const mind = new MindGame(
+      fakeCtx({ game: seedPlaying({ a: [1], b: [2] }) }),
+      dataEnv(),
+    );
+    expect((await call(mind, 'end', { userId: 'x' })).error).to.match(
+      /host or an admin/,
+    );
+    expect(
+      (await call(mind, 'end', { userId: 'x', isAdmin: true })).state.phase,
+    ).to.equal('ended');
   });
 
   it('mind_best_level only increases', async () => {
     const env = dataEnv();
     const play = async (level) => {
-      const game = seedPlaying({ a: [], b: [7] }, { level, totalLevels: level, maxLevelReached: level });
-      await call(new MindGame(fakeCtx({ game }), env), 'play', { userId: 'b', messageId: 'm1' });
+      const game = seedPlaying(
+        { a: [], b: [7] },
+        { level, totalLevels: level, maxLevelReached: level },
+      );
+      await call(new MindGame(fakeCtx({ game }), env), 'play', {
+        userId: 'b',
+        messageId: 'm1',
+      });
     };
     await play(4);
     await play(2);
@@ -177,7 +227,9 @@ describe('MindGame', () => {
       const old = Date.now() - IDLE_MS - 1000;
       const game = seedPlaying({ a: [1], b: [2] }, { updatedAt: old });
       const ctx = fakeCtx({ game });
-      const fetchStub = sinon.stub(globalThis, 'fetch').resolves(new Response('{}'));
+      const fetchStub = sinon
+        .stub(globalThis, 'fetch')
+        .resolves(new Response('{}'));
       const mind = new MindGame(ctx, env);
 
       await mind.alarm();
@@ -197,7 +249,12 @@ describe('MindGame', () => {
 
     it('records nothing for a lobby timeout', async () => {
       const env = dataEnv();
-      const lobbyState = newLobby({ hostId: 'a', channelId: CH, guildId: 'g', now: 0 });
+      const lobbyState = newLobby({
+        hostId: 'a',
+        channelId: CH,
+        guildId: 'g',
+        now: 0,
+      });
       const ctx = fakeCtx({ game: { ...lobbyState, messageId: 'm1' } });
       sinon.stub(globalThis, 'fetch').resolves(new Response('{}'));
       await new MindGame(ctx, env).alarm();
@@ -208,13 +265,73 @@ describe('MindGame', () => {
     it('clears state when the panel was deleted (404)', async () => {
       const game = seedPlaying({ a: [1], b: [2] }, { updatedAt: 0 });
       const ctx = fakeCtx({ game });
-      sinon.stub(globalThis, 'fetch').resolves(new Response('gone', { status: 404 }));
+      sinon
+        .stub(globalThis, 'fetch')
+        .resolves(new Response('gone', { status: 404 }));
       await new MindGame(ctx, dataEnv()).alarm();
       expect(ctx.map.get('game')).to.equal(undefined);
     });
 
+    it('falls back to the last interaction token where the bot cannot edit', async () => {
+      const env = { ...dataEnv(), DISCORD_APPLICATION_ID: 'app1' };
+      const ctx = fakeCtx({
+        game: seedPlaying({ a: [1], b: [2] }, { updatedAt: 0 }),
+      });
+      const mind = new MindGame(ctx, env);
+      await call(mind, 'hand', { userId: 'a', messageId: 'm1', token: 'tok1' });
+      const fetchStub = sinon.stub(globalThis, 'fetch');
+      fetchStub.onFirstCall().resolves(new Response('no', { status: 403 }));
+      fetchStub.onSecondCall().resolves(new Response('{}'));
+
+      await mind.alarm();
+
+      expect(fetchStub.secondCall.args[0]).to.match(
+        /webhooks\/app1\/tok1\/messages\/@original$/,
+      );
+      expect(fetchStub.secondCall.args[1].headers.Authorization).to.equal(
+        undefined,
+      );
+      // A 404 from the bot is not "panel deleted" when the token path was available.
+      expect(ctx.map.get('game').phase).to.equal('ended');
+    });
+
+    it('ignores the token of a stale click and of an expired window', async () => {
+      const env = { ...dataEnv(), DISCORD_APPLICATION_ID: 'app1' };
+      const ctx = fakeCtx({
+        game: seedPlaying({ a: [1], b: [2] }, { updatedAt: 0 }),
+      });
+      const mind = new MindGame(ctx, env);
+      await call(mind, 'hand', {
+        userId: 'a',
+        messageId: 'OLD',
+        token: 'stale',
+      });
+      expect(ctx.map.get('panelToken')).to.equal(undefined);
+
+      ctx.map.set('panelToken', { token: 'old', at: Date.now() - 15 * 60_000 });
+      const fetchStub = sinon
+        .stub(globalThis, 'fetch')
+        .resolves(new Response('gone', { status: 404 }));
+      await mind.alarm();
+      expect(fetchStub.calledOnce).to.equal(true);
+      expect(ctx.map.get('game')).to.equal(undefined);
+    });
+
+    it('redraws the panel for /end when asked to', async () => {
+      const env = dataEnv();
+      const ctx = fakeCtx({ game: seedPlaying({ a: [1], b: [2] }) });
+      const fetchStub = sinon
+        .stub(globalThis, 'fetch')
+        .resolves(new Response('{}'));
+      await call(new MindGame(ctx, env), 'end', { userId: 'a', redraw: true });
+      expect(fetchStub.calledOnce).to.equal(true);
+      expect(fetchStub.firstCall.args[1].method).to.equal('PATCH');
+    });
+
     it('survives a failing Discord call', async () => {
-      const ctx = fakeCtx({ game: seedPlaying({ a: [1], b: [2] }, { updatedAt: 0 }) });
+      const ctx = fakeCtx({
+        game: seedPlaying({ a: [1], b: [2] }, { updatedAt: 0 }),
+      });
       sinon.stub(globalThis, 'fetch').rejects(new Error('offline'));
       await new MindGame(ctx, dataEnv()).alarm();
       expect(ctx.map.get('game').phase).to.equal('ended');
@@ -229,7 +346,9 @@ describe('MindGame', () => {
     });
 
     it('sweeps a finished game on the next alarm', async () => {
-      const ctx = fakeCtx({ game: { ...seedPlaying({ a: [], b: [] }), phase: 'lost' } });
+      const ctx = fakeCtx({
+        game: { ...seedPlaying({ a: [], b: [] }), phase: 'lost' },
+      });
       await new MindGame(ctx, dataEnv()).alarm();
       expect(ctx.map.get('game')).to.equal(undefined);
     });

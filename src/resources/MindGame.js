@@ -20,6 +20,11 @@ import {
 import { DISCORD_API } from '../util.js';
 
 const GAME = 'game';
+// The interaction token of the latest click on the panel. Its @original is the
+// panel, so it can edit it where the bot cannot (group DMs, user-installed
+// contexts). Discord honours a token for 15 minutes.
+const PANEL_TOKEN = 'panelToken';
+const TOKEN_MS = 14 * 60_000;
 const TOMBSTONE_MS = 24 * 60 * 60_000;
 const TERMINAL = ['won', 'lost', 'ended'];
 const ACTIVE = ['lobby', 'playing', 'between'];
@@ -45,7 +50,8 @@ export class MindGame {
   async handle(request) {
     const { pathname } = new URL(request.url);
     const route = pathname.slice(1);
-    const body = request.method === 'POST' ? await request.json().catch(() => ({})) : {};
+    const body =
+      request.method === 'POST' ? await request.json().catch(() => ({})) : {};
     const now = Date.now();
     const game = await this.state.storage.get(GAME);
 
@@ -74,6 +80,7 @@ export class MindGame {
     if (route === 'setMessage') {
       const next = { ...game, messageId: body.messageId };
       await this.state.storage.put(GAME, next);
+      await this.rememberToken(body.token, now);
       return reply({ state: next, events: [], message: panelMessage(next) });
     }
 
@@ -92,9 +99,18 @@ export class MindGame {
       }
     }
 
+    // Only a click that passed the stale check may replace the token.
+    if (body.messageId) {
+      await this.rememberToken(body.token, now);
+    }
+
     const { userId } = body;
     if (route === 'hand') {
-      return reply({ state: game, events: [], message: handMessage(game, userId) });
+      return reply({
+        state: game,
+        events: [],
+        message: handMessage(game, userId),
+      });
     }
 
     let result;
@@ -123,10 +139,14 @@ export class MindGame {
           : { error: 'You are not in this game.' };
         break;
       case 'cancel':
-        result = this.canEnd(game, userId, body.isAdmin, true) ?? endGame(game, 'ended', now);
+        result =
+          this.canEnd(game, userId, body.isAdmin, true) ??
+          endGame(game, 'ended', now);
         break;
       case 'end':
-        result = this.canEnd(game, userId, body.isAdmin, false) ?? endGame(game, 'ended', now);
+        result =
+          this.canEnd(game, userId, body.isAdmin, false) ??
+          endGame(game, 'ended', now);
         break;
       default:
         return new Response('Not found', { status: 404 });
@@ -134,7 +154,20 @@ export class MindGame {
     if (result.error) {
       return fail(result.error);
     }
-    return this.commit(result.state, result.events, now);
+    const committed = await this.commit(result.state, result.events, now);
+    if (body.redraw) {
+      // /mind end is a slash command, so nothing redraws the panel for it.
+      await this.later(
+        this.editPanel(result.state, panelMessage(result.state)),
+      );
+    }
+    return committed;
+  }
+
+  async rememberToken(token, now) {
+    if (token) {
+      await this.state.storage.put(PANEL_TOKEN, { token, at: now });
+    }
   }
 
   /** Host, a participant or an admin may end; Cancel is host or admin only. */
@@ -169,7 +202,9 @@ export class MindGame {
 
   /** Off the response path in production; awaited when there is no waitUntil. */
   async later(promise) {
-    const safe = promise.catch((err) => console.error('mind stats failed:', err));
+    const safe = promise.catch((err) =>
+      console.error('mind stats failed:', err),
+    );
     if (this.state.waitUntil) {
       this.state.waitUntil(safe);
     } else {
@@ -179,10 +214,12 @@ export class MindGame {
 
   async data(name, path, body) {
     const ns = this.env.NOXBOT_DATA;
-    const res = await ns.get(ns.idFromName(name)).fetch(`https://dummy${path}`, {
-      method: 'POST',
-      body: JSON.stringify(body ?? {}),
-    });
+    const res = await ns
+      .get(ns.idFromName(name))
+      .fetch(`https://dummy${path}`, {
+        method: 'POST',
+        body: JSON.stringify(body ?? {}),
+      });
     return res.json();
   }
 
@@ -249,27 +286,53 @@ export class MindGame {
     await this.editPanel(result.state, message);
   }
 
-  /** Show the timeout on the panel. A deleted panel (404) just drops the state. */
+  async patch(url, headers, message) {
+    return fetch(url, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...headers },
+      body: JSON.stringify(message),
+    });
+  }
+
+  /**
+   * Redraw the panel. The bot token works wherever the bot can see the channel;
+   * elsewhere (group DMs, user-installed use) fall back to the last click's
+   * interaction token. A deleted panel (404 with no way left to try) drops the state.
+   */
   async editPanel(game, message) {
     if (!game.messageId) {
       return;
     }
     try {
-      const res = await fetch(
+      const bot = await this.patch(
         `${DISCORD_API}/channels/${game.channelId}/messages/${game.messageId}`,
-        {
-          method: 'PATCH',
-          headers: {
-            Authorization: `Bot ${this.env.DISCORD_TOKEN}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify(message),
-        },
+        { Authorization: `Bot ${this.env.DISCORD_TOKEN}` },
+        message,
       );
-      if (res.status === 404) {
+      if (bot.ok) {
+        return;
+      }
+      const saved = await this.state.storage.get(PANEL_TOKEN);
+      if (saved && Date.now() - saved.at < TOKEN_MS) {
+        const hook = await this.patch(
+          `${DISCORD_API}/webhooks/${this.env.DISCORD_APPLICATION_ID}/${saved.token}/messages/@original`,
+          {},
+          message,
+        );
+        if (hook.ok) {
+          return;
+        }
+        console.error(
+          'mind panel edit failed:',
+          hook.status,
+          await hook.text(),
+        );
+        return;
+      }
+      if (bot.status === 404) {
         await this.state.storage.delete(GAME);
-      } else if (!res.ok) {
-        console.error('mind panel edit failed:', res.status, await res.text());
+      } else {
+        console.error('mind panel edit failed:', bot.status, await bot.text());
       }
     } catch (err) {
       console.error('mind panel edit failed:', err);
