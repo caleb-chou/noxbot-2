@@ -411,7 +411,10 @@ describe('poker evaluate: validation and names', () => {
   });
 });
 
-describe('poker evaluate: properties', () => {
+describe('poker evaluate: properties', function () {
+  // Thousands of random hands: well over mocha's 2s default on a slow runner.
+  this.timeout(60_000);
+
   /** Deals n random players plus a board from a seeded shuffle. */
   function randomSpot(rng, variant, n) {
     const deck = shuffle(newDeck(), rng);

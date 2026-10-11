@@ -626,7 +626,6 @@ describe('poker game: timers, sitting out, leaving, rebuy, close', () => {
     expect(r.state.toAct).to.equal(1);
     expect(r.state.turnDeadline).to.equal(T0 + 120_000);
     expect(timeout(mkTable([200, 200]), T0).error).to.be.a('string');
-    s = r.state;
   });
 
   it('timeout auto-checks when checking is free', () => {
@@ -680,7 +679,6 @@ describe('poker game: timers, sitting out, leaving, rebuy, close', () => {
     const r = ok(setSittingOut(s, 'p0', true, T0 + 5));
     expect(ofType(r.events, 'action')[0]).to.include({ userId: 'p0', action: 'fold', auto: 'sitout' });
     expect(r.state.toAct).to.equal(1);
-    s = r.state;
   });
 
   it('leaving mid-hand: auto-fold when action arrives, cash-out after the hand', () => {
@@ -717,7 +715,6 @@ describe('poker game: timers, sitting out, leaving, rebuy, close', () => {
     ]);
     expect(r.state.seats[1]).to.equal(null);
     expect(leave(r.state, 'zzz', T0).error).to.match(/not seated/);
-    s = r.state;
   });
 
   it('a waiting (not dealt in) player leaves at once even mid-hand', () => {
@@ -751,7 +748,6 @@ describe('poker game: timers, sitting out, leaving, rebuy, close', () => {
     let o = ok(sit(off, 'a', undefined, 500, T0)).state;
     o.seats[0].stack = 10;
     expect(rebuy(o, 'a', 100, T0).error).to.match(/off/);
-    h = o;
   });
 
   it('close() cashes everyone out and closes the table', () => {

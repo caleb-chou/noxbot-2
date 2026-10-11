@@ -278,12 +278,12 @@ describe('PokerTable', () => {
 
       let out = await post('call', { userId: 'u1' });
       expect(out.ping.content).to.include('<@u2>');
-      out = await post('call', { userId: 'u2' });
+      await post('call', { userId: 'u2' });
       for (let i = 0; i < 3; i++) {
         const state = saved();
         const actor = state.seats[state.toAct].userId;
-        out = await post('call', { userId: actor });
-        out = await post('call', { userId: actor === 'u1' ? 'u2' : 'u1' });
+        await post('call', { userId: actor });
+        await post('call', { userId: actor === 'u1' ? 'u2' : 'u1' });
       }
       expect(saved().phase).to.equal('between');
       expect(saved().seats[0].stack).to.equal(102);
