@@ -2,7 +2,7 @@
 
 A Discord bot running on a Cloudflare Worker, with per-user data in a Durable Object.
 
-Commands: `/coinflip`, `/8ball`, `/lengthwave` + `/leaderboard` (a Wavelength-style guessing game), mail (`/sendmail`, `/checkmail`, `/readmail`, `/deletemail`), stats (`/getstats`, plus admin-only `/incrementuserdata`, `/updatestats`, `/dropstats`), `/emote` (copy a 7tv emote), `/choosesomeone`, `/chattrack`, `/roll`, `/remindme` (DMs you later) and `/reminders` (list or cancel them), `/mind` (a cooperative card game), settings (`/getsettings`, `/updatesettings`) and `/invite`.
+Commands: `/coinflip`, `/8ball`, `/lengthwave` + `/leaderboard` (a Wavelength-style guessing game), mail (`/sendmail`, `/checkmail`, `/readmail`, `/deletemail`), stats (`/getstats`, plus admin-only `/incrementuserdata`, `/updatestats`, `/dropstats`), `/emote` (copy a 7tv emote), `/choosesomeone`, `/chattrack`, `/roll`, `/remindme` (DMs you later) and `/reminders` (list or cancel them), `/mind` (a cooperative card game), `/poker` (Hold'em and Omaha tables), settings (`/getsettings`, `/updatesettings`) and `/invite`.
 
 Right-click menus: **Send mail** and **Get stats** on a user, **Steal emoji** on a message (copies its first custom emoji to the server).
 
@@ -20,6 +20,28 @@ Each level deals every player N cards (N is the level number) from 1-100. Togeth
 After deploying, a human needs to run `npm run register` to publish the command. `wrangler deploy` applies the `v2` Durable Object migration that adds the `MindGame` class.
 
 noxbot deliberately stores nothing personal beyond what a command needs (mail, reminders, stats). Features that would track personal details, like birthdays, are out of scope.
+
+## Poker (`/poker`)
+
+No-limit Texas Hold'em or pot-limit Omaha for 2-9 players, played with buttons in a channel (servers, group DMs and user DMs, like `/mind`). One table per channel.
+
+- `/poker start` opens a table and seats you as host. Options (all optional): `variant` (holdem or plo), `mode` (casual or ranked), `seats` (2-9, default 6), `buyin` (default 500) with optional `buyin_min` / `buyin_max` for a range, `blinds`, `escalate`, `escalate_every`, `rebuys`, `max_rebuys`, `timer` and `ping`.
+- `/poker end` closes the table (host or an admin). Mid-hand it closes after the hand. Everyone is cashed out.
+- `/poker bank` shows your bankroll and ranked record, `/poker daily` tops it up, `/poker leaderboard` ranks ranked net profit, `/poker rules` shows hand rankings and the buttons.
+
+**Buttons.** Sit (asks for a buy-in when the table has a range), Leave (takes effect after the hand), Fold, Check/Call, Raise (type the total you raise *to*), All-in, My hand (your cards, only to you), Rebuy, Sit out / in (toggles) and Start hand (the next hand also starts by itself 5 seconds after a hand ends). Cards show as `A♥️ T♠️`.
+
+**Casual vs ranked.** Casual tables use table-only play money and store nothing. Ranked tables take your buy-in from a persistent bankroll and pay your stack back when you leave, bust or the table closes. New players start with $5,000. `/poker daily` adds $1,000 once every 24 hours while your balance is under $5,000. The leaderboard is ranked net profit (cash-outs minus buy-ins and rebuys); the daily top-up is not profit. The bank never takes a cut: across a table's life the players' bankroll changes sum to zero.
+
+**Blind ladder.** `blinds` is a comma-separated list of `small/big` levels, at most 12, each big blind higher than the last, whole numbers, 100 characters at most. The default is `1/2,2/4,3/6,5/10,10/20,15/30,25/50,50/100`. For example `blinds:5/10,10/20,25/50` starts at 5/10. `blinds:1/2` is a fixed-blind table. The ladder only moves when `escalate` is on: blinds step up one level every `escalate_every` hands (default 10) and stay at the last level.
+
+**Rebuys.** Between hands, if your stack is under the table's minimum buy-in, Rebuy tops you back up to the buy-in (ranked tables allow 3 by default, casual unlimited; change with `max_rebuys`, or turn off with `rebuys:false`).
+
+**Timer.** You have `timer` seconds (default 60, 15-300) to act. When it runs out you check if that is free, otherwise fold. Two timeouts in a row sit you out until you press Sit out / in. A table with no activity for 30 minutes closes and cashes everyone out. With `ping` on, the bot posts a mention when it is your turn.
+
+**Honest notes.** Ranked is play money: chips have no real value and the bankroll can only be changed through poker. The bot cannot read the channel, so it cannot stop players from colluding, sharing cards or running several accounts; treat ranked as a friendly ladder, not a tournament. Hole cards are kept inside the table's Durable Object and are only ever shown to their owner (and to everyone for hands that reach showdown).
+
+After deploying, a human needs to run `npm run register` to publish the command. `wrangler deploy` applies the `v3` Durable Object migration that adds the `PokerTable` class (binding `NOXBOT_POKER`).
 
 ## Project structure
 

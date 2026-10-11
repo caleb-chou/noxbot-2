@@ -19,6 +19,10 @@ class_name = "UserData"
 name = "NOXBOT_MIND"
 class_name = "MindGame"
 
+[[durable_objects.bindings]]
+name = "NOXBOT_POKER"
+class_name = "PokerTable"
+
 [[migrations]]
 tag = "v1" # Should be unique for each entry
 new_sqlite_classes = ["UserData"] # Array of new classes
@@ -26,3 +30,7 @@ new_sqlite_classes = ["UserData"] # Array of new classes
 [[migrations]]
 tag = "v2"
 new_sqlite_classes = ["MindGame"]
+
+[[migrations]]
+tag = "v3"
+new_sqlite_classes = ["PokerTable"]

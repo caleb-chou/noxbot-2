@@ -17,14 +17,9 @@ import {
   startVote,
   statsFor,
 } from '../functions/mind.js';
-import { DISCORD_API } from '../util.js';
+import { editPanel, rememberToken } from '../functions/panel.js';
 
 const GAME = 'game';
-// The interaction token of the latest click on the panel. Its @original is the
-// panel, so it can edit it where the bot cannot (group DMs, user-installed
-// contexts). Discord honours a token for 15 minutes.
-const PANEL_TOKEN = 'panelToken';
-const TOKEN_MS = 14 * 60_000;
 const TOMBSTONE_MS = 24 * 60 * 60_000;
 const TERMINAL = ['won', 'lost', 'ended'];
 const ACTIVE = ['lobby', 'playing', 'between'];
@@ -165,9 +160,7 @@ export class MindGame {
   }
 
   async rememberToken(token, now) {
-    if (token) {
-      await this.state.storage.put(PANEL_TOKEN, { token, at: now });
-    }
+    await rememberToken(this.state.storage, token, now);
   }
 
   /** Host, a participant or an admin may end; Cancel is host or admin only. */
@@ -286,56 +279,18 @@ export class MindGame {
     await this.editPanel(result.state, message);
   }
 
-  async patch(url, headers, message) {
-    return fetch(url, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', ...headers },
-      body: JSON.stringify(message),
-    });
-  }
-
-  /**
-   * Redraw the panel. The bot token works wherever the bot can see the channel;
-   * elsewhere (group DMs, user-installed use) fall back to the last click's
-   * interaction token. A deleted panel (404 with no way left to try) drops the state.
-   */
+  /** Redraw the panel; a deleted panel (404 with no way left to try) drops the state. */
   async editPanel(game, message) {
-    if (!game.messageId) {
-      return;
-    }
-    try {
-      const bot = await this.patch(
-        `${DISCORD_API}/channels/${game.channelId}/messages/${game.messageId}`,
-        { Authorization: `Bot ${this.env.DISCORD_TOKEN}` },
-        message,
-      );
-      if (bot.ok) {
-        return;
-      }
-      const saved = await this.state.storage.get(PANEL_TOKEN);
-      if (saved && Date.now() - saved.at < TOKEN_MS) {
-        const hook = await this.patch(
-          `${DISCORD_API}/webhooks/${this.env.DISCORD_APPLICATION_ID}/${saved.token}/messages/@original`,
-          {},
-          message,
-        );
-        if (hook.ok) {
-          return;
-        }
-        console.error(
-          'mind panel edit failed:',
-          hook.status,
-          await hook.text(),
-        );
-        return;
-      }
-      if (bot.status === 404) {
-        await this.state.storage.delete(GAME);
-      } else {
-        console.error('mind panel edit failed:', bot.status, await bot.text());
-      }
-    } catch (err) {
-      console.error('mind panel edit failed:', err);
+    const outcome = await editPanel({
+      env: this.env,
+      storage: this.state.storage,
+      channelId: game.channelId,
+      messageId: game.messageId,
+      message,
+      label: 'mind',
+    });
+    if (outcome === 'gone') {
+      await this.state.storage.delete(GAME);
     }
   }
 }

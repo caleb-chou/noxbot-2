@@ -1,13 +1,23 @@
 import { score_guess } from '../functions/lengthwave.js';
 import { MAX_REMINDERS, reminderMessage } from '../functions/remind.js';
 import { sendDM } from '../util.js';
+import { applyOp, claimDaily, newBankroll } from '../functions/poker/bank.js';
 
 // Not stats: /get feeds the stats embed and must not leak these, and the
 // admin stat commands must not overwrite or delete them.
-const INTERNAL_KEYS = new Set(['mailbox', 'settings', 'reminders']);
+const INTERNAL_KEYS = new Set(['mailbox', 'settings', 'reminders', 'bankroll']);
 const isInternal = (key) => INTERNAL_KEYS.has(key) || key.startsWith('chat:');
 
-const bad = (error) => Response.json({ error }, { status: 400 });
+const bad = (error, extra) => Response.json({ error, ...extra }, { status: 400 });
+
+// Bank ops are read-modify-write; run them one at a time per storage so
+// concurrent requests (and duplicate ids) can't interleave.
+const bankQueues = new WeakMap();
+function bankSerial(storage, fn) {
+  const run = (bankQueues.get(storage) ?? Promise.resolve()).then(fn);
+  bankQueues.set(storage, run.catch(() => {}));
+  return run;
+}
 
 export class UserData {
   constructor(ctx, env) {
@@ -193,6 +203,49 @@ export class UserData {
         await storage.deleteAlarm();
       }
       return Response.json(rest);
+    }
+
+    if (pathname === '/bankGet' && request.method === 'POST') {
+      return bankSerial(storage, async () =>
+        Response.json((await storage.get('bankroll')) ?? newBankroll()),
+      );
+    }
+
+    if (pathname === '/bankApply' && request.method === 'POST') {
+      const data = await request.json().catch(() => null);
+      if (!data || typeof data !== 'object') {
+        return bad('Invalid request.');
+      }
+      return bankSerial(storage, async () => {
+        const result = applyOp(
+          (await storage.get('bankroll')) ?? newBankroll(),
+          data,
+        );
+        if (result.error) {
+          return bad(result.error);
+        }
+        if (!result.duplicate) {
+          await storage.put('bankroll', result.record);
+        }
+        return Response.json(
+          result.duplicate ? { ...result.record, duplicate: true } : result.record,
+        );
+      });
+    }
+
+    if (pathname === '/bankDaily' && request.method === 'POST') {
+      const data = await request.json().catch(() => ({}));
+      return bankSerial(storage, async () => {
+        const result = claimDaily(
+          (await storage.get('bankroll')) ?? newBankroll(),
+          data?.now ?? Date.now(),
+        );
+        if (result.error) {
+          return bad(result.error, { remainingMs: result.remainingMs });
+        }
+        await storage.put('bankroll', result.record);
+        return Response.json(result.record);
+      });
     }
 
     if (pathname === '/getChat') {
