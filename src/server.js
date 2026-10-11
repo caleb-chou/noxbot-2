@@ -36,10 +36,12 @@ import {
   GET_STATS_MENU,
   STEAL_EMOJI_MENU,
   MIND_COMMAND,
+  POKER_COMMAND,
 } from './commands.js';
 import { createCoolRole, assignRole } from './functions/coolrole.js';
 import { UserData } from './resources/UserData.js';
 import { MindGame } from './resources/MindGame.js';
+import { PokerTable } from './resources/PokerTable.js';
 import {
   sendMailNotification,
   interactionUser,
@@ -80,6 +82,12 @@ import {
   MAX_REMINDER_MS,
 } from './functions/remind.js';
 import { lobbyMessage } from './functions/mind.js';
+import { parseTableConfig } from './functions/poker/config.js';
+import {
+  bankMessage,
+  leaderboardEmbed,
+  rulesMessage,
+} from './functions/poker/messages.js';
 
 const router = AutoRouter();
 
@@ -342,6 +350,256 @@ function mindLeaderboard(env, ctx, interaction) {
   });
 }
 
+const pokerTable = (env, channelId) =>
+  env.NOXBOT_POKER.get(env.NOXBOT_POKER.idFromName(`poker:${channelId}`));
+
+/**
+ * Call one PokerTable route as the acting user. The user id comes only from the
+ * verified interaction. The DO owns every rule and never returns raw state.
+ */
+async function pokerCall(env, interaction, path, extra = {}) {
+  const res = await post(pokerTable(env, interaction.channel_id), path, {
+    userId: interactionUser(interaction).id,
+    isAdmin: isAdmin(interaction),
+    channelId: interaction.channel_id,
+    guildId: guildIdOf(interaction),
+    messageId: interaction.message?.id,
+    token: interaction.token,
+    ...extra,
+  });
+  return res.json();
+}
+
+/** Post the DO's ping/showdown messages as webhook follow-ups, off the 3s path. */
+function pokerFollowUps(env, ctx, interaction, result) {
+  const messages = [result.showdown, result.ping].filter(Boolean);
+  if (messages.length === 0) {
+    return Promise.resolve();
+  }
+  return background(
+    ctx,
+    (async () => {
+      for (const message of messages) {
+        try {
+          await fetch(
+            `${DISCORD_API}/webhooks/${env.DISCORD_APPLICATION_ID}/${interaction.token}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(message),
+            },
+          );
+        } catch (err) {
+          console.error('poker follow-up failed:', err);
+        }
+      }
+    })(),
+  );
+}
+
+/** Turn a PokerTable reply into the interaction response. */
+async function pokerRespond(env, ctx, interaction, result) {
+  if (!result || result.error) {
+    return ephemeralText(result?.error ?? 'Something went wrong with that table.');
+  }
+  if (result.modal) {
+    return Response.json({
+      type: InteractionResponseType.MODAL,
+      data: result.modal.data ?? result.modal,
+    });
+  }
+  if (!result.message) {
+    return ephemeralText('Something went wrong with that table.');
+  }
+  const isEphemeral =
+    result.ephemeral ||
+    (result.message.flags & InteractionResponseFlags.EPHEMERAL) !== 0;
+  if (isEphemeral) {
+    return reply(result.message, true);
+  }
+  await pokerFollowUps(env, ctx, interaction, result);
+  return updateMessage(result.message);
+}
+
+/** Every named option of the subcommand; unset ones are simply absent. */
+function subOptions(interaction) {
+  const out = {};
+  for (const o of interaction.data.options?.[0]?.options ?? []) {
+    if (o.value !== undefined && o.value !== null) {
+      out[o.name] = o.value;
+    }
+  }
+  return out;
+}
+
+/** A whole number typed into a modal, or null. */
+function modalInteger(interaction, id) {
+  const text = String(modalValue(interaction, id) ?? '')
+    .trim()
+    .replace(/^\$/, '');
+  return /^\d{1,12}$/.test(text) ? Number(text) : null;
+}
+
+/** Handle a pk_<action>|<channelId> button press. */
+async function pokerComponent(env, ctx, interaction) {
+  const [action, channelId] = interaction.data.custom_id.slice('pk_'.length).split('|');
+  if (!interaction.channel_id || channelId !== interaction.channel_id) {
+    return ephemeralText('This table belongs to a different channel.');
+  }
+
+  const routes = {
+    sit: '/sitModal',
+    leave: '/leave',
+    fold: '/fold',
+    call: '/call',
+    raise: '/raiseModal',
+    allin: '/allin',
+    hand: '/hand',
+    rebuy: '/rebuy',
+    sitout: '/sitout',
+    start: '/start',
+  };
+  if (!Object.hasOwn(routes, action)) {
+    return ephemeralText('Unknown poker action.');
+  }
+  if (action === 'sit' && interactionUser(interaction).bot) {
+    return ephemeralText('Bots cannot play poker.');
+  }
+  return pokerRespond(env, ctx, interaction, await pokerCall(env, interaction, routes[action]));
+}
+
+/** Handle pk_sit_modal|<channelId> and pk_raise_modal|<channelId> submits. */
+async function pokerModal(env, ctx, interaction) {
+  const [kind, channelId] = interaction.data.custom_id.split('|');
+  if (!interaction.channel_id || channelId !== interaction.channel_id) {
+    return ephemeralText('This table belongs to a different channel.');
+  }
+  if (kind === 'pk_sit_modal') {
+    if (interactionUser(interaction).bot) {
+      return ephemeralText('Bots cannot play poker.');
+    }
+    const buyIn = modalInteger(interaction, 'buyin_input');
+    if (buyIn === null) {
+      return ephemeralText('The buy-in must be a whole number, like 500.');
+    }
+    return pokerRespond(
+      env,
+      ctx,
+      interaction,
+      await pokerCall(env, interaction, '/sit', { buyIn }),
+    );
+  }
+  if (kind === 'pk_raise_modal') {
+    const amount = modalInteger(interaction, 'raise_input');
+    if (amount === null) {
+      return ephemeralText('The raise must be a whole number, like 40.');
+    }
+    return pokerRespond(
+      env,
+      ctx,
+      interaction,
+      await pokerCall(env, interaction, '/raise', { amount }),
+    );
+  }
+  return ephemeralText('Unknown poker form.');
+}
+
+/** /poker start: validate, open the table, post the panel, remember its id. */
+async function pokerStart(env, ctx, interaction) {
+  if (!interaction.channel_id) {
+    return ephemeralText('Run /poker start in a channel.');
+  }
+  if (interactionUser(interaction).bot) {
+    return ephemeralText('Bots cannot play poker.');
+  }
+  const parsed = parseTableConfig(subOptions(interaction));
+  if (parsed.error) {
+    return ephemeralText(parsed.error);
+  }
+  const created = await pokerCall(env, interaction, '/table', {
+    hostId: interactionUser(interaction).id,
+    config: parsed.config,
+  });
+  if (created.error || !created.message) {
+    return ephemeralText(created.error ?? 'Could not open a table.');
+  }
+
+  // A slash command reply carries no message id, so defer, fill the placeholder
+  // with PATCH @original (which returns the message), and store its id.
+  await background(
+    ctx,
+    (async () => {
+      try {
+        const res = await editOriginalResponse(env, interaction, created.message);
+        if (!res.ok) {
+          throw new Error(`Discord returned ${res.status}`);
+        }
+        const posted = await res.json();
+        await pokerCall(env, interaction, '/setMessage', { messageId: posted.id });
+      } catch (err) {
+        console.error('poker table post failed:', err);
+        await pokerCall(env, interaction, '/end', { isAdmin: true });
+        await editOriginalResponse(env, interaction, {
+          content: `Could not post the table: ${err.message}`,
+        });
+      }
+    })(),
+  );
+  return Response.json({
+    type: InteractionResponseType.DEFERRED_CHANNEL_MESSAGE_WITH_SOURCE,
+    data: {},
+  });
+}
+
+async function pokerEndCommand(env, interaction) {
+  if (!interaction.channel_id) {
+    return ephemeralText('Run /poker end in a channel.');
+  }
+  const result = await pokerCall(env, interaction, '/end', {
+    // /poker end is not pressed on the panel, so it has no message id to check.
+    messageId: undefined,
+  });
+  if (result.error) {
+    return ephemeralText(result.error);
+  }
+  return ephemeralText(result.info ?? 'Table closed.');
+}
+
+async function pokerBank(env, interaction) {
+  const res = await post(userData(env, interactionUser(interaction).id), '/bankGet', {});
+  return reply(bankMessage(await res.json()), true);
+}
+
+async function pokerDaily(env, interaction) {
+  const res = await post(userData(env, interactionUser(interaction).id), '/bankDaily', {
+    now: Date.now(),
+  });
+  const data = await res.json();
+  if (!res.ok) {
+    if (data.remainingMs > 0) {
+      const mins = Math.ceil(data.remainingMs / 60000);
+      return ephemeralText(
+        `You already claimed today. Try again in ${Math.floor(mins / 60)}h ${mins % 60}m.`,
+      );
+    }
+    return ephemeralText(data.error ?? 'Could not claim the daily bonus.');
+  }
+  return ephemeralText(`Claimed! Your bankroll is now $${data.balance}.`);
+}
+
+function pokerLeaderboard(env, ctx, interaction) {
+  return deferred(env, ctx, interaction, async () => {
+    const { poker: scores } = await (
+      await userData(env, 'poker').fetch('https://dummy/get')
+    ).json();
+    const rows = Object.entries(scores ?? {})
+      .map(([userId, s]) => ({ userId, ...s }))
+      .sort((a, b) => (b.net ?? 0) - (a.net ?? 0))
+      .slice(0, 10);
+    return leaderboardEmbed(rows);
+  });
+}
+
 /**
  * A simple :wave: hello page to verify the worker is working.
  */
@@ -407,6 +665,10 @@ router.post('/', async (request, env, ctx) => {
       }
 
       return ephemeralText(response.message);
+    }
+
+    if (customId.startsWith('pk_')) {
+      return pokerModal(env, ctx, interaction);
     }
 
     if (customId.startsWith('lengthwave_clue_modal')) {
@@ -485,6 +747,10 @@ router.post('/', async (request, env, ctx) => {
 
     if (customId.startsWith('mind_')) {
       return mindComponent(env, interaction);
+    }
+
+    if (customId.startsWith('pk_')) {
+      return pokerComponent(env, ctx, interaction);
     }
 
     if (customId === 'gamut_clue_button') {
@@ -714,6 +980,25 @@ router.post('/', async (request, env, ctx) => {
             return mindLeaderboard(env, ctx, interaction);
           default:
             return ephemeralText('Unknown /mind subcommand.');
+        }
+      }
+
+      case POKER_COMMAND.name: {
+        switch (interaction.data.options?.[0]?.name) {
+          case 'start':
+            return pokerStart(env, ctx, interaction);
+          case 'end':
+            return pokerEndCommand(env, interaction);
+          case 'bank':
+            return pokerBank(env, interaction);
+          case 'daily':
+            return pokerDaily(env, interaction);
+          case 'leaderboard':
+            return pokerLeaderboard(env, ctx, interaction);
+          case 'rules':
+            return reply(rulesMessage(), true);
+          default:
+            return ephemeralText('Unknown /poker subcommand.');
         }
       }
 
@@ -957,4 +1242,4 @@ const server = {
 };
 
 export default server;
-export { UserData, MindGame };
+export { UserData, MindGame, PokerTable };

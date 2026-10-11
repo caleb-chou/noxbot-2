@@ -437,3 +437,117 @@ export const MIND_COMMAND = {
     },
   ],
 };
+
+// Poker: Texas Hold'em and Pot-Limit Omaha played with buttons in a channel.
+// Only `start` takes options and all of them are optional, so there is no
+// required-before-optional ordering to trip over. Same contexts as /mind.
+export const POKER_COMMAND = {
+  integration_types: [0, 1],
+  contexts: [0, 2],
+  name: 'poker',
+  description: 'Play poker with friends',
+  options: [
+    {
+      name: 'start',
+      description: 'Open a poker table in this channel',
+      type: 1, // SUB_COMMAND
+      options: [
+        {
+          name: 'variant',
+          description: "Game type (default Texas Hold'em)",
+          type: 3, // STRING
+          choices: [
+            { name: "Texas Hold'em (no limit)", value: 'holdem' },
+            { name: 'Pot-Limit Omaha', value: 'plo' },
+          ],
+        },
+        {
+          name: 'mode',
+          description: 'Casual (free chips) or ranked (uses your bankroll)',
+          type: 3,
+          choices: [
+            { name: 'Casual', value: 'casual' },
+            { name: 'Ranked', value: 'ranked' },
+          ],
+        },
+        {
+          name: 'seats',
+          description: 'Number of seats, 2-9 (default 6)',
+          type: 4, // INTEGER
+          min_value: 2,
+          max_value: 9,
+        },
+        {
+          name: 'buyin',
+          description: 'Buy-in in chips (default 500)',
+          type: 4,
+          min_value: 1,
+          max_value: 1000000000,
+        },
+        {
+          name: 'buyin_min',
+          description: 'Lowest buy-in players can choose (default: the buy-in)',
+          type: 4,
+          min_value: 1,
+          max_value: 1000000000,
+        },
+        {
+          name: 'buyin_max',
+          description: 'Highest buy-in players can choose (default: the buy-in)',
+          type: 4,
+          min_value: 1,
+          max_value: 1000000000,
+        },
+        {
+          name: 'blinds',
+          description: 'Blind levels as small/big, comma separated (e.g. 1/2,2/4,5/10)',
+          type: 3,
+          max_length: 100,
+        },
+        {
+          name: 'escalate',
+          description: 'Raise the blinds up the ladder as hands are played (default off)',
+          type: 5, // BOOLEAN
+        },
+        {
+          name: 'escalate_every',
+          description: 'Hands between blind increases when escalating (default 10)',
+          type: 4,
+          min_value: 1,
+        },
+        {
+          name: 'rebuys',
+          description: 'Allow rebuys between hands (default on)',
+          type: 5,
+        },
+        {
+          name: 'max_rebuys',
+          description: 'Rebuys allowed per player (default unlimited casual, 3 ranked)',
+          type: 4,
+          min_value: 0,
+        },
+        {
+          name: 'timer',
+          description: 'Seconds per turn, 15-300 (default 60)',
+          type: 4,
+          min_value: 15,
+          max_value: 300,
+        },
+        {
+          name: 'ping',
+          description: 'Mention players when it is their turn (default on)',
+          type: 5,
+        },
+      ],
+    },
+    { name: 'end', description: 'Close the poker table in this channel', type: 1 },
+    { name: 'bank', description: 'See your ranked bankroll and record', type: 1 },
+    { name: 'daily', description: 'Claim your daily ranked bankroll top-up', type: 1 },
+    {
+      name: 'leaderboard',
+      description: 'See the top ranked players by net profit',
+      type: 1,
+    },
+    { name: 'rules', description: 'Hand rankings and how to use the buttons', type: 1 },
+  ],
+};
